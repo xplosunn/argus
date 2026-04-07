@@ -1,0 +1,33 @@
+{
+  "name": "@xplosunn/argus",
+  "publishConfig": { "access": "public" },
+  "version": "1.0.1",
+  "description": "Local-first declaration-centric code review tool",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "argus": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "landing-page:demo": "npm run build && node dist/scripts/generate-static-demo.js",
+    "landing-page:preview": "npx serve -l 4173 landing-page",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "review": "tsx cli/index.ts review",
+    "start": "node dist/cli/index.js review"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.9.0",
+  "dependencies": {
+    "typescript": "^5.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "vitest": "^3.2.4"
+  }
+}

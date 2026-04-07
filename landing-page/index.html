@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Argus helps you review before you push, with better context around the code that changed."
+    />
+    <title>Argus — Review before you push</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=Manrope:wght@400;500;600;700;800&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%2314161c' stroke='%236ee7c5' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%236ee7c5'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div class="bg-layer" aria-hidden="true"></div>
+    <div class="bg-noise" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <div class="wrap">
+        <a class="logo" href="#">Argus</a>
+        <a
+          class="nav-cta"
+          href="https://www.npmjs.com/package/@xplosunn/argus"
+          rel="noopener noreferrer"
+          target="_blank"
+          >npm · @xplosunn/argus</a
+        >
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="wrap hero-grid">
+          <div class="hero-content">
+            <p class="hero-eyebrow">Local-first</p>
+            <h1>
+              Review before you push
+            </h1>
+            <p class="hero-lead">
+              Argus helps you review your local changes, understand the symbols it touches, and widen
+              the lens only when you need it. Reduce the feedback loop and keep the review close to your train of thought.
+            </p>
+            <div class="hero-actions">
+              <a
+                class="btn btn-primary"
+                href="https://www.npmjs.com/package/@xplosunn/argus"
+                rel="noopener noreferrer"
+                target="_blank"
+                >Install from npm</a
+              >
+            </div>
+          </div>
+          <div class="hero-visual">
+            <div class="terminal" role="img" aria-label="Example terminal session">
+              <div class="terminal-bar">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="terminal-title">your-repo</span>
+              </div>
+              <div class="terminal-body">
+                <div><span class="prompt">$</span> <span class="cmd">npx @xplosunn/argus review</span></div>
+                <div class="comment"># Opens local server + browser</div>
+                <div><span class="hl">→</span> Review <span class="hl">default-branch…HEAD</span></div>
+                <div class="comment"># On main: uncommitted changes</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="demo-section" id="demo" aria-labelledby="demo-heading">
+        <div class="wrap demo-grid">
+          <div class="demo-copy">
+            <p class="section-kicker">See a real review</p>
+            <h2 id="demo-heading" class="section-title">PR demo</h2>
+            <p class="section-intro">
+              Compare a GitHub Pull Request with what you would see locally when running Argus.
+            </p>
+          </div>
+          <div class="demo-card-shell">
+            <article class="demo-card">
+              <p class="demo-label">Public review demo</p>
+              <h3 class="demo-title">xplosunn/argus-demo-turkish#1</h3>
+              <p class="demo-card-copy">
+                Bugfix.
+              </p>
+              <div class="demo-meta">
+                <span class="demo-chip">xplosunn/argus-demo-turkish</span>
+                <span class="demo-meta-item">PR #1</span>
+              </div>
+              <ul class="demo-highlights">
+                <li>The review opens on the changed <code>canRead</code> declaration in <code>src/schema.ts</code>.</li>
+                <li>The added regression test is visible beside the local <code>newSchema</code> and <code>oldSchema</code> variables.</li>
+              </ul>
+              <div class="demo-actions">
+                <a
+                  class="btn btn-secondary"
+                  href="https://github.com/xplosunn/argus-demo-turkish/pull/1/changes"
+                  rel="noopener noreferrer"
+                  target="_blank"
+                  >View PR on GitHub</a
+                >
+                <a class="btn btn-primary" href="./review-demo/public-pr/">Open Argus demo</a>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="wip-section" id="status" aria-labelledby="wip-heading">
+        <div class="wrap">
+          <div class="wip-panel">
+            <p class="wip-eyebrow">Status</p>
+            <h2 id="wip-heading" class="section-title">Still getting sharper</h2>
+            <ul class="wip-list">
+              <li>
+                Argus is under active development, so expect rough edges and frequent iteration.
+              </li>
+              <li>
+                <strong>TypeScript only</strong> for now. Declaration-aware review currently targets
+                TypeScript sources; other languages are not supported yet.
+              </li>
+              <li>
+                <strong>Team features</strong> are on the way. Today the focus is helping one
+                developer review more confidently before sharing code.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="context-section" id="features">
+        <div class="wrap">
+          <p class="section-kicker">Stay in the flow</p>
+          <h2 class="section-title">Built for how you read code</h2>
+          <p class="section-intro">
+            Instead of scrolling raw patches first, Argus surfaces the declarations your diff touches, then lets you drill into context and usages.
+          </p>
+          <div class="support-grid">
+            <article class="support-card">
+              <div class="support-icon">01</div>
+              <h3>Touched declarations first</h3>
+              <p>
+                Top-level symbols surface first, with locals available when you need finer detail.
+              </p>
+            </article>
+            <article class="support-card">
+              <div class="support-icon">02</div>
+              <h3>Usage lookup</h3>
+              <p>Jump from a changed declaration to the places where it is used.</p>
+            </article>
+            <article class="support-card">
+              <div class="support-icon">03</div>
+              <h3>Full-file diff viewer</h3>
+              <p>
+                Inline added/removed lines, declaration jumps, and syntax highlighting.
+              </p>
+            </article>
+            <article class="support-card">
+              <div class="support-icon">04</div>
+              <h3>Local web UI</h3>
+              <p>
+                Your repo stays on your machine. No
+                source upload step required.
+              </p>
+            </article>
+            <article class="support-card">
+              <div class="support-icon">05</div>
+              <h3>Smart review range</h3>
+              <p>
+                Feature branch reviews default to <code>default-branch…HEAD</code>; on the default
+                branch, Argus shifts to <code>HEAD…WORKTREE</code> for uncommitted work.
+              </p>
+            </article>
+            <article class="support-card">
+              <div class="support-icon">06</div>
+              <h3>CLI entrypoint</h3>
+              <p>Run <code>argus review</code> from the project you want to inspect.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>Argus</span>
+        <span><a href="https://www.npmjs.com/package/@xplosunn/argus" rel="noopener noreferrer" target="_blank">@xplosunn/argus</a></span>
+      </div>
+    </footer>
+  </body>
+</html>

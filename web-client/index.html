@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Argus Review</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Argus</h1>
+      <div id="review-meta" class="meta"></div>
+      <div id="diff-stats" class="diff-stats"></div>
+    </header>
+    <main class="layout">
+      <section class="pane pane-symbols">
+        <div class="pane-header">
+          <h2>Files & Symbols</h2>
+          <label class="pane-sort" for="symbols-sort">
+            <span>Sort</span>
+            <select id="symbols-sort">
+              <option value="alphabetical">Alphabetical</option>
+              <option value="usages" selected>Usages (diff, asc)</option>
+            </select>
+          </label>
+        </div>
+        <div id="symbols-list" class="list"></div>
+      </section>
+      <div
+        class="pane-resizer"
+        data-resizer="symbols-code"
+        role="separator"
+        aria-label="Resize files and code panes"
+        aria-orientation="vertical"
+        tabindex="0"
+      ></div>
+      <section class="pane pane-code">
+        <h2 id="code-title">File</h2>
+        <div id="code-view" class="code-view"></div>
+      </section>
+      <div
+        class="pane-resizer"
+        data-resizer="code-usages"
+        role="separator"
+        aria-label="Resize code and usages panes"
+        aria-orientation="vertical"
+        tabindex="0"
+      ></div>
+      <section class="pane pane-usages">
+        <h2 id="usages-title">Usages</h2>
+        <div id="usages-list" class="list"></div>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
