@@ -100,6 +100,16 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .logo {
@@ -120,6 +130,7 @@ code {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.8125rem;
   padding: 0.5rem 1rem;
@@ -130,10 +141,24 @@ code {
   transition: border-color 0.2s, background 0.2s;
 }
 
+.nav-cta-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+}
+
 .nav-cta:hover {
   text-decoration: none;
   border-color: var(--accent);
   background: var(--accent-dim);
+}
+
+@media (max-width: 640px) {
+  .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
 }
 
 /* Hero */
