@@ -1,7 +1,7 @@
 {
   "name": "@xplosunn/argus",
   "publishConfig": { "access": "public" },
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Local-first declaration-centric code review tool",
   "main": "dist/cli/index.js",
   "bin": {
