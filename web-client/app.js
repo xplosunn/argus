@@ -1,6 +1,7 @@
 import {
   clampAnchorLine as clampAnchorLineLogic,
   compareFilesForSortMode as compareFilesForSortModeLogic,
+  countReferences as countReferencesLogic,
   compareSymbols as compareSymbolsLogic,
   countPatchLineTotals as countPatchLineTotalsLogic,
   countUsagesInDiff as countUsagesInDiffLogic,
@@ -37,6 +38,7 @@ const state = {
   fileContentRequestsByPath: new Map(),
   patchRowsByFilePath: new Map(),
   renderRequestId: 0,
+  paneSizes: null,
   shikiModulePromise: null,
   shikiUnavailable: false
 };
@@ -55,6 +57,7 @@ const PANE_MIN_WIDTH_BY_KEY = Object.freeze({
   code: 350,
   usages: 260
 });
+state.paneSizes = { ...PANE_DEFAULT_SIZE_BY_KEY };
 
 const symbolsListElement = document.getElementById("symbols-list");
 const codeTitleElement = document.getElementById("code-title");
@@ -73,6 +76,7 @@ const codeUsagesResizerElement = document.querySelector('[data-resizer="code-usa
 
 initializeSortControl();
 initializePaneResizers();
+setUsagesPaneVisible(false);
 void initialize();
 
 async function initialize() {
@@ -115,6 +119,7 @@ function renderEmptyReview() {
   codeViewElement.innerHTML = `<div class="empty">No touched declarations were detected in this diff.</div>`;
   usagesTitleElement.textContent = "Usages";
   usagesListElement.innerHTML = `<div class="empty">Nothing to show.</div>`;
+  setUsagesPaneVisible(false);
 }
 
 function renderNoSelection(filePath) {
@@ -124,6 +129,7 @@ function renderNoSelection(filePath) {
   } else {
     usagesListElement.innerHTML = `<div class="empty">Select a file or symbol to load usages.</div>`;
   }
+  setUsagesPaneVisible(false);
 }
 
 function renderSymbolList() {
@@ -404,8 +410,9 @@ async function ensureUsagesLoaded(symbolId) {
     return;
   }
 
-  usagesTitleElement.textContent = "Usages (loading)";
-  usagesListElement.innerHTML = `<div class="empty">Loading...</div>`;
+  usagesTitleElement.textContent = "Usages";
+  usagesListElement.innerHTML = "";
+  setUsagesPaneVisible(false);
 
   const payload = await fetchJson("/api/usages", {
     method: "POST",
@@ -426,15 +433,20 @@ function renderUsages(symbolId) {
   if (!symbolPayload || !symbol) {
     usagesTitleElement.textContent = "Usages";
     usagesListElement.innerHTML = `<div class="empty">No usage data.</div>`;
+    setUsagesPaneVisible(false);
     return;
   }
 
   usagesTitleElement.textContent = `Usages of ${symbol.name} (${symbolPayload.usages.length})`;
 
-  if (symbolPayload.usages.length === 0) {
-    usagesListElement.innerHTML = `<div class="empty">No usages found.</div>`;
+  if (countReferences(symbolPayload.usages) === 0) {
+    usagesTitleElement.textContent = "Usages";
+    usagesListElement.innerHTML = "";
+    setUsagesPaneVisible(false);
     return;
   }
+
+  setUsagesPaneVisible(true);
 
   const diffFileSet = new Set((state.bootstrap?.files ?? []).map((file) => file.path));
   const usagesInDiff = [];
@@ -799,6 +811,7 @@ function renderError(message) {
   symbolsListElement.innerHTML = "";
   codeViewElement.innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
   usagesListElement.innerHTML = `<div class="empty">No data.</div>`;
+  setUsagesPaneVisible(false);
 }
 
 function countDiffLineTotals(files) {
@@ -1160,6 +1173,20 @@ function initializePaneResizers() {
   attachPaneResizer(codeUsagesResizerElement, "code", "usages");
 }
 
+function setUsagesPaneVisible(isVisible) {
+  if (!layoutElement || !paneUsagesElement || !codeUsagesResizerElement) {
+    return;
+  }
+
+  layoutElement.classList.toggle("layout-usages-hidden", !isVisible);
+  paneUsagesElement.hidden = !isVisible;
+  codeUsagesResizerElement.hidden = !isVisible;
+}
+
+function isUsagesPaneVisible() {
+  return paneUsagesElement?.hidden !== true;
+}
+
 function attachPaneResizer(resizerElement, leftPaneKey, rightPaneKey) {
   resizerElement.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || isStackedLayout()) {
@@ -1211,6 +1238,11 @@ function attachPaneResizer(resizerElement, leftPaneKey, rightPaneKey) {
 }
 
 function resizePanePairByDelta(widths, leftPaneKey, rightPaneKey, deltaX) {
+  if (!isUsagesPaneVisible() && leftPaneKey === "symbols" && rightPaneKey === "code") {
+    resizeSymbolsAndCombinedPaneByDelta(widths, deltaX);
+    return;
+  }
+
   const leftWidth = widths[leftPaneKey];
   const rightWidth = widths[rightPaneKey];
   const pairWidth = leftWidth + rightWidth;
@@ -1234,6 +1266,28 @@ function resizePanePairByDelta(widths, leftPaneKey, rightPaneKey, deltaX) {
   applyPaneSizes(widthsToPaneSizes(nextWidths));
 }
 
+function resizeSymbolsAndCombinedPaneByDelta(widths, deltaX) {
+  const symbolsWidth = widths.symbols;
+  const combinedWidth = widths.code;
+  const pairWidth = symbolsWidth + combinedWidth;
+  if (pairWidth <= 0) {
+    return;
+  }
+
+  const minSymbols = PANE_MIN_WIDTH_BY_KEY.symbols;
+  const minCombined = PANE_MIN_WIDTH_BY_KEY.code;
+  const maxSymbols = pairWidth - minCombined;
+  const nextSymbolsWidth = maxSymbols < minSymbols
+    ? clampNumber(symbolsWidth + deltaX, 0, pairWidth)
+    : clampNumber(symbolsWidth + deltaX, minSymbols, maxSymbols);
+  const nextCombinedSize = ((pairWidth - nextSymbolsWidth) / pairWidth) * 100;
+
+  applyPaneSizes({
+    symbols: (nextSymbolsWidth / pairWidth) * 100,
+    ...splitCombinedPaneSize(nextCombinedSize)
+  });
+}
+
 function readPaneWidths() {
   return {
     symbols: paneSymbolsElement?.getBoundingClientRect().width ?? 0,
@@ -1248,13 +1302,14 @@ function applyPaneSizes(sizes) {
   }
 
   const normalizedSizes = normalizePaneSizes(sizes);
+  state.paneSizes = normalizedSizes;
   layoutElement.style.setProperty("--pane-symbols-size", normalizedSizes.symbols.toFixed(4));
   layoutElement.style.setProperty("--pane-code-size", normalizedSizes.code.toFixed(4));
   layoutElement.style.setProperty("--pane-usages-size", normalizedSizes.usages.toFixed(4));
 }
 
 function persistPaneSizesFromLayout() {
-  savePaneSizes(widthsToPaneSizes(readPaneWidths()));
+  savePaneSizes(readPaneSizesFromLayout());
 }
 
 function savePaneSizes(sizes) {
@@ -1309,6 +1364,36 @@ function widthsToPaneSizes(widths) {
     symbols: (widths.symbols / totalWidth) * 100,
     code: (widths.code / totalWidth) * 100,
     usages: (widths.usages / totalWidth) * 100
+  };
+}
+
+function readPaneSizesFromLayout() {
+  const widths = readPaneWidths();
+  if (isUsagesPaneVisible()) {
+    return widthsToPaneSizes(widths);
+  }
+
+  const totalWidth = widths.symbols + widths.code;
+  if (totalWidth <= 0) {
+    return { ...state.paneSizes };
+  }
+
+  return {
+    symbols: (widths.symbols / totalWidth) * 100,
+    ...splitCombinedPaneSize((widths.code / totalWidth) * 100)
+  };
+}
+
+function splitCombinedPaneSize(combinedSize) {
+  const paneSizes = state.paneSizes ?? PANE_DEFAULT_SIZE_BY_KEY;
+  const codeAndUsagesSize = paneSizes.code + paneSizes.usages;
+  const defaultCombinedSize = PANE_DEFAULT_SIZE_BY_KEY.code + PANE_DEFAULT_SIZE_BY_KEY.usages;
+  const codeRatio =
+    codeAndUsagesSize > 0 ? paneSizes.code / codeAndUsagesSize : PANE_DEFAULT_SIZE_BY_KEY.code / defaultCombinedSize;
+  const codeSize = combinedSize * codeRatio;
+  return {
+    code: codeSize,
+    usages: combinedSize - codeSize
   };
 }
 
@@ -1410,4 +1495,8 @@ async function loadUsageDiffCountForSymbol(symbolId) {
 
 function countUsagesInDiff(usages) {
   return countUsagesInDiffLogic(usages);
+}
+
+function countReferences(usages) {
+  return countReferencesLogic(usages);
 }

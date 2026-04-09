@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  countReferences,
   SHIKI_LANGS_FALLBACK,
   clampAnchorLine,
   compareFilesForSortMode,
@@ -280,5 +281,7 @@ describe("web-client logic helpers", () => {
     ]);
 
     expect(countUsagesInDiff([{ isInDiff: true }, { isInDiff: false }, { isInDiff: true }])).toBe(2);
+    expect(countReferences([{ isDefinition: true }, { isDefinition: false }, { isDefinition: false }])).toBe(2);
+    expect(countReferences([{ isDefinition: true }])).toBe(0);
   });
 });

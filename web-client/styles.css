@@ -76,6 +76,13 @@ body {
   min-height: 0;
 }
 
+.layout.layout-usages-hidden {
+  grid-template-columns:
+    minmax(230px, calc((100% - var(--splitter-size)) * var(--pane-symbols-size) / 100))
+    var(--splitter-size)
+    minmax(350px, 1fr);
+}
+
 .pane {
   border: 1px solid var(--border);
   background: var(--panel);

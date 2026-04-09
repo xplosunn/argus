@@ -560,3 +560,7 @@ export function compareFilesForSortMode(leftPath, rightPath, sortMode, getUsageD
 export function countUsagesInDiff(usages) {
   return usages.filter((usage) => usage.isInDiff).length;
 }
+
+export function countReferences(usages) {
+  return (Array.isArray(usages) ? usages : []).filter((usage) => usage?.isDefinition !== true).length;
+}
