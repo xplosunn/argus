@@ -22,6 +22,11 @@
   box-sizing: border-box;
 }
 
+.pane[hidden],
+.pane-resizer[hidden] {
+  display: none;
+}
+
 body {
   margin: 0;
   background: radial-gradient(circle at top, #fefaf0 0%, var(--bg) 45%, #ebe4da 100%);
@@ -447,9 +452,8 @@ body.pane-resizing {
 
 @media (max-width: 980px) {
   .layout {
-    grid-template-columns: 1fr;
-    grid-auto-rows: minmax(220px, 1fr);
-    height: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .pane-resizer {
