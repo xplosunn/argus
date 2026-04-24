@@ -25,10 +25,13 @@ import {
 
 const state = {
   bootstrap: null,
+  selectedView: "dependency-graph",
   selectedSymbolId: null,
   selectedFilePath: null,
   expandedFilePaths: new Set(),
   expandedTopLevelId: null,
+  dependencyGraph: null,
+  dependencyGraphRequest: null,
   sortMode: "usages",
   usagesBySymbolId: new Map(),
   usageInDiffCountBySymbolId: new Map(),
@@ -97,7 +100,7 @@ async function initialize() {
       return;
     }
 
-    selectFile(files[0].path);
+    selectDependencyGraph();
   } catch (error) {
     renderError(error instanceof Error ? error.message : "Unable to load review.");
   }
@@ -141,6 +144,8 @@ function renderSymbolList() {
     symbolsListElement.innerHTML = `<div class="empty">No files found.</div>`;
     return;
   }
+
+  symbolsListElement.appendChild(createReviewMapItem());
 
   for (const folderGroup of groupFilesByFolder(files)) {
     const folderContainer = document.createElement("div");
@@ -197,6 +202,30 @@ function renderSymbolList() {
 
     symbolsListElement.appendChild(folderContainer);
   }
+}
+
+function createReviewMapItem() {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "symbol-item review-map-item";
+  if (state.selectedView === "dependency-graph") {
+    item.classList.add("selected");
+  }
+
+  const main = document.createElement("div");
+  main.className = "symbol-main";
+
+  const title = document.createElement("div");
+  title.className = "symbol-title";
+  title.textContent = "Review Map";
+
+  main.appendChild(title);
+  item.appendChild(main);
+  item.addEventListener("click", () => {
+    selectDependencyGraph();
+  });
+
+  return item;
 }
 
 function createFileItem(file, options = {}) {
@@ -318,12 +347,23 @@ function createExpanderControl({ isExpanded, label, onToggle }) {
   return expander;
 }
 
+function selectDependencyGraph() {
+  state.selectedView = "dependency-graph";
+  state.selectedFilePath = null;
+  state.selectedSymbolId = null;
+  state.expandedTopLevelId = null;
+  renderSymbolList();
+  renderNoSelection(null);
+  void renderDependencyGraph();
+}
+
 function selectFile(filePath) {
   const file = findFile(filePath);
   if (!file) {
     return;
   }
 
+  state.selectedView = "file";
   expandFilePath(filePath);
   state.selectedFilePath = filePath;
   state.selectedSymbolId = null;
@@ -334,6 +374,7 @@ function selectFile(filePath) {
 }
 
 async function selectSymbol(symbolId) {
+  state.selectedView = "file";
   state.selectedSymbolId = symbolId;
   const selectedSymbol = findSymbol(symbolId);
   state.selectedFilePath = selectedSymbol?.declaration.filePath ?? null;
@@ -512,6 +553,7 @@ function createUsageItem(usage) {
   item.appendChild(top);
   item.appendChild(preview);
   item.addEventListener("click", () => {
+    state.selectedView = "file";
     expandFilePath(usage.location.filePath);
     state.selectedFilePath = usage.location.filePath;
     renderSymbolList();
@@ -519,6 +561,507 @@ function createUsageItem(usage) {
   });
 
   return item;
+}
+
+async function renderDependencyGraph() {
+  const renderRequestId = ++state.renderRequestId;
+  state.loadedFilePath = null;
+  state.loadedFileContent = undefined;
+  codeTitleElement.textContent = "Review Map";
+  renderDependencyGraphLoading();
+
+  try {
+    const graph = await ensureDependencyGraphLoaded();
+    const layout = await layoutDependencyGraph(graph);
+    if (renderRequestId !== state.renderRequestId || state.selectedView !== "dependency-graph") {
+      return;
+    }
+
+    renderDependencyGraphSvg(graph, layout);
+  } catch (error) {
+    if (renderRequestId !== state.renderRequestId || state.selectedView !== "dependency-graph") {
+      return;
+    }
+
+    renderDependencyGraphError(error instanceof Error ? error.message : "Unable to load review map.");
+  }
+}
+
+function renderDependencyGraphLoading() {
+  codeViewElement.innerHTML = `<div class="empty">Loading review map...</div>`;
+}
+
+function renderDependencyGraphError(message) {
+  codeViewElement.innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
+}
+
+async function ensureDependencyGraphLoaded() {
+  if (state.dependencyGraph) {
+    return state.dependencyGraph;
+  }
+
+  if (!state.dependencyGraphRequest) {
+    state.dependencyGraphRequest = fetchJson("/api/dependency-graph")
+      .then((payload) => {
+        state.dependencyGraph = normalizeDependencyGraphForRendering(payload);
+        return state.dependencyGraph;
+      })
+      .finally(() => {
+        state.dependencyGraphRequest = null;
+      });
+  }
+
+  return state.dependencyGraphRequest;
+}
+
+function normalizeDependencyGraphForRendering(graph) {
+  const rawNodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const nodes = rawNodes
+    .filter((node) => typeof node?.filePath === "string" && node.filePath.length > 0)
+    .map((node) => ({
+      ...node,
+      id: node.filePath,
+      touchedSymbolCount: Number.isFinite(Number(node.touchedSymbolCount))
+        ? Math.max(0, Math.trunc(Number(node.touchedSymbolCount)))
+        : 0
+    }))
+    .sort((left, right) => left.filePath.localeCompare(right.filePath));
+  const nodeFilePaths = new Set(nodes.map((node) => node.filePath));
+  const edges = (Array.isArray(graph?.edges) ? graph.edges : [])
+    .filter((edge) => {
+      if (typeof edge?.sourceFilePath !== "string" || typeof edge?.targetFilePath !== "string") {
+        return false;
+      }
+      return (
+        edge.sourceFilePath !== edge.targetFilePath &&
+        nodeFilePaths.has(edge.sourceFilePath) &&
+        nodeFilePaths.has(edge.targetFilePath)
+      );
+    })
+    .map((edge) => ({
+      ...edge,
+      id:
+        typeof edge.id === "string" && edge.id.length > 0
+          ? edge.id
+          : `${edge.sourceFilePath}->${edge.targetFilePath}`
+    }))
+    .sort((left, right) => {
+      if (left.sourceFilePath !== right.sourceFilePath) {
+        return left.sourceFilePath.localeCompare(right.sourceFilePath);
+      }
+      return left.targetFilePath.localeCompare(right.targetFilePath);
+    });
+
+  return {
+    nodes,
+    edges
+  };
+}
+
+async function layoutDependencyGraph(graph) {
+  const nodeWidth = 220;
+  const nodeHeight = 62;
+  const directoryPaddingX = 14;
+  const directoryPaddingTop = 28;
+  const directoryPaddingBottom = 14;
+  const directoryGap = 20;
+  const fileGap = 10;
+  const columnGap = 96;
+  const ranksByNodeId = rankDependencyGraphNodes(graph);
+  const columns = groupDirectoriesByRank(graph.nodes, ranksByNodeId);
+  const directoryWidth = nodeWidth + directoryPaddingX * 2;
+  const laidOutNodes = [];
+  const laidOutDirectories = [];
+  let maxBottom = 0;
+
+  for (const [column, directories] of columns.entries()) {
+    const columnX = 28 + column * (directoryWidth + columnGap);
+    let currentY = 28;
+
+    for (const directory of directories) {
+      const directoryHeight =
+        directoryPaddingTop +
+        directory.nodes.length * nodeHeight +
+        Math.max(0, directory.nodes.length - 1) * fileGap +
+        directoryPaddingBottom;
+
+      laidOutDirectories.push({
+        id: directory.path,
+        path: directory.path,
+        x: columnX,
+        y: currentY,
+        width: directoryWidth,
+        height: directoryHeight,
+        fileCount: directory.nodes.length
+      });
+
+      for (const [row, node] of directory.nodes.entries()) {
+        laidOutNodes.push({
+          ...node,
+          directoryPath: directory.path,
+          x: columnX + directoryPaddingX,
+          y: currentY + directoryPaddingTop + row * (nodeHeight + fileGap),
+          width: nodeWidth,
+          height: nodeHeight
+        });
+      }
+
+      maxBottom = Math.max(maxBottom, currentY + directoryHeight);
+      currentY += directoryHeight + directoryGap;
+    }
+  }
+
+  const nodeById = new Map(laidOutNodes.map((node) => [node.id, node]));
+  const directoryByPath = new Map(laidOutDirectories.map((directory) => [directory.path, directory]));
+  const pairLaneCountsByKey = new Map();
+  const sameDirectoryLaneCountsByKey = new Map();
+
+  const laidOutEdges = graph.edges.map((edge) => {
+    const source = nodeById.get(edge.sourceFilePath);
+    const target = nodeById.get(edge.targetFilePath);
+    const sourceDirectory = source ? directoryByPath.get(source.directoryPath) : null;
+    const targetDirectory = target ? directoryByPath.get(target.directoryPath) : null;
+
+    if (!source || !target || !sourceDirectory || !targetDirectory) {
+      return {
+        ...edge,
+        points: []
+      };
+    }
+
+    const laneMeta = nextDependencyEdgeLaneMeta(
+      sourceDirectory,
+      targetDirectory,
+      pairLaneCountsByKey,
+      sameDirectoryLaneCountsByKey
+    );
+
+    return {
+      ...edge,
+      points: pointsForDependencyEdge(source, sourceDirectory, target, targetDirectory, laneMeta)
+    };
+  });
+
+  return {
+    width: Math.max(320, 56 + columns.length * directoryWidth + Math.max(0, columns.length - 1) * columnGap),
+    height: Math.max(220, maxBottom + 28),
+    directories: laidOutDirectories,
+    nodes: laidOutNodes,
+    edges: laidOutEdges
+  };
+}
+
+function rankDependencyGraphNodes(graph) {
+  const rankByNodeId = new Map(graph.nodes.map((node) => [node.id, 0]));
+  const incomingByNodeId = new Map(graph.nodes.map((node) => [node.id, []]));
+  const outgoingByNodeId = new Map(graph.nodes.map((node) => [node.id, []]));
+
+  for (const edge of graph.edges) {
+    incomingByNodeId.get(edge.targetFilePath)?.push(edge.sourceFilePath);
+    outgoingByNodeId.get(edge.sourceFilePath)?.push(edge.targetFilePath);
+  }
+
+  const queue = graph.nodes
+    .filter((node) => (incomingByNodeId.get(node.id) ?? []).length === 0)
+    .map((node) => node.id);
+  const visited = new Set(queue);
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const nodeId = queue[index];
+    const nextRank = (rankByNodeId.get(nodeId) ?? 0) + 1;
+
+    for (const targetNodeId of outgoingByNodeId.get(nodeId) ?? []) {
+      rankByNodeId.set(targetNodeId, Math.max(rankByNodeId.get(targetNodeId) ?? 0, nextRank));
+      if (!visited.has(targetNodeId)) {
+        visited.add(targetNodeId);
+        queue.push(targetNodeId);
+      }
+    }
+  }
+
+  // Cycles do not have a natural left-to-right rank. Keep cyclic or otherwise
+  // unreached nodes stable instead of waiting for a graph layout dependency.
+  return rankByNodeId;
+}
+
+function groupDirectoriesByRank(nodes, rankByNodeId) {
+  const directoriesByPath = new Map();
+  for (const node of nodes) {
+    const directoryPath = folderForPath(node.filePath);
+    const rank = rankByNodeId.get(node.id) ?? 0;
+    const directory = directoriesByPath.get(directoryPath) ?? {
+      path: directoryPath,
+      rank,
+      nodes: []
+    };
+    directory.rank = Math.min(directory.rank, rank);
+    directory.nodes.push(node);
+    directoriesByPath.set(directoryPath, directory);
+  }
+
+  const columnsByRank = new Map();
+  for (const directory of directoriesByPath.values()) {
+    directory.nodes.sort((left, right) => {
+      const leftRank = rankByNodeId.get(left.id) ?? 0;
+      const rightRank = rankByNodeId.get(right.id) ?? 0;
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+      if (left.touchedSymbolCount !== right.touchedSymbolCount) {
+        return right.touchedSymbolCount - left.touchedSymbolCount;
+      }
+      return left.filePath.localeCompare(right.filePath);
+    });
+
+    const column = columnsByRank.get(directory.rank) ?? [];
+    column.push(directory);
+    columnsByRank.set(directory.rank, column);
+  }
+
+  return [...columnsByRank.entries()]
+    .sort(([leftRank], [rightRank]) => leftRank - rightRank)
+    .map(([, directories]) =>
+      directories.sort((left, right) => left.path.localeCompare(right.path))
+    );
+}
+
+function pointsForDependencyEdge(source, sourceDirectory, target, targetDirectory, laneMeta) {
+  const sourceY = source.y + source.height / 2;
+  const targetY = target.y + target.height / 2;
+  const laneOffset = 18;
+  const laneSpacing = 18;
+
+  if (sourceDirectory.path === targetDirectory.path) {
+    const sourceX = source.x + source.width;
+    const targetX = target.x + target.width;
+    const laneX = sourceDirectory.x + sourceDirectory.width + laneOffset + laneMeta.sameDirectoryLaneIndex * laneSpacing;
+
+    return [
+      { x: sourceX, y: sourceY },
+      { x: laneX, y: sourceY },
+      { x: laneX, y: targetY },
+      { x: targetX, y: targetY }
+    ];
+  }
+
+  const targetIsToRight = targetDirectory.x >= sourceDirectory.x;
+
+  if (targetIsToRight) {
+    const sourceX = source.x + source.width;
+    const targetX = target.x;
+    const sourceLaneX = sourceDirectory.x + sourceDirectory.width + laneOffset + laneMeta.pairLaneIndex * laneSpacing;
+    const targetLaneX = targetDirectory.x - laneOffset - laneMeta.pairLaneIndex * laneSpacing;
+
+    return [
+      { x: sourceX, y: sourceY },
+      { x: sourceLaneX, y: sourceY },
+      { x: sourceLaneX, y: targetY },
+      { x: targetLaneX, y: targetY },
+      { x: targetX, y: targetY }
+    ];
+  }
+
+  const sourceX = source.x;
+  const targetX = target.x + target.width;
+  const sourceLaneX = sourceDirectory.x - laneOffset - laneMeta.pairLaneIndex * laneSpacing;
+  const targetLaneX = targetDirectory.x + targetDirectory.width + laneOffset + laneMeta.pairLaneIndex * laneSpacing;
+
+  return [
+    { x: sourceX, y: sourceY },
+    { x: sourceLaneX, y: sourceY },
+    { x: sourceLaneX, y: targetY },
+    { x: targetLaneX, y: targetY },
+    { x: targetX, y: targetY }
+  ];
+}
+
+function nextDependencyEdgeLaneMeta(
+  sourceDirectory,
+  targetDirectory,
+  pairLaneCountsByKey,
+  sameDirectoryLaneCountsByKey
+) {
+  if (sourceDirectory.path === targetDirectory.path) {
+    const laneKey = `${sourceDirectory.path}\0loop-right`;
+    const sameDirectoryLaneIndex = sameDirectoryLaneCountsByKey.get(laneKey) ?? 0;
+    sameDirectoryLaneCountsByKey.set(laneKey, sameDirectoryLaneIndex + 1);
+    return {
+      sameDirectoryLaneIndex,
+      sourceLaneIndex: 0,
+      targetLaneIndex: 0
+    };
+  }
+
+  const pairKey = [sourceDirectory.path, targetDirectory.path].sort().join("\0");
+  const pairLaneIndex = pairLaneCountsByKey.get(pairKey) ?? 0;
+  pairLaneCountsByKey.set(pairKey, pairLaneIndex + 1);
+
+  return {
+    sameDirectoryLaneIndex: 0,
+    pairLaneIndex
+  };
+}
+
+function renderDependencyGraphSvg(graph, layout) {
+  codeViewElement.innerHTML = "";
+
+  const container = document.createElement("div");
+  container.className = "dependency-graph-view";
+
+  const summary = document.createElement("div");
+  summary.className = "dependency-graph-summary";
+  summary.textContent = `${layout.directories?.length ?? 0} directories | ${graph.nodes.length} files | ${graph.edges.length} cross-file links`;
+  container.appendChild(summary);
+
+  if (graph.nodes.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No files found.";
+    container.appendChild(empty);
+    codeViewElement.appendChild(container);
+    return;
+  }
+
+  const canvas = document.createElement("div");
+  canvas.className = "dependency-graph-canvas";
+  const svg = createSvgElement("svg");
+  svg.classList.add("dependency-graph-svg");
+  svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Review dependency graph");
+  svg.style.minWidth = `${Math.ceil(layout.width)}px`;
+  svg.style.minHeight = `${Math.ceil(layout.height)}px`;
+
+  const defs = createSvgElement("defs");
+  const marker = createSvgElement("marker");
+  marker.setAttribute("id", "review-map-arrow");
+  marker.setAttribute("viewBox", "0 0 10 10");
+  marker.setAttribute("refX", "9");
+  marker.setAttribute("refY", "5");
+  marker.setAttribute("markerWidth", "7");
+  marker.setAttribute("markerHeight", "7");
+  marker.setAttribute("orient", "auto-start-reverse");
+  const markerPath = createSvgElement("path");
+  markerPath.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+  markerPath.classList.add("dependency-graph-arrow");
+  marker.appendChild(markerPath);
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  const directoryLayer = createSvgElement("g");
+  directoryLayer.classList.add("dependency-graph-directories");
+  for (const directory of layout.directories ?? []) {
+    directoryLayer.appendChild(createDependencyGraphDirectory(directory));
+  }
+  svg.appendChild(directoryLayer);
+
+  const edgeLayer = createSvgElement("g");
+  edgeLayer.classList.add("dependency-graph-edges");
+  for (const edge of layout.edges) {
+    const edgePath = createSvgElement("path");
+    edgePath.classList.add("dependency-graph-edge");
+    edgePath.setAttribute("d", pathFromGraphPoints(edge.points));
+    edgePath.setAttribute("marker-end", "url(#review-map-arrow)");
+    edgeLayer.appendChild(edgePath);
+  }
+  svg.appendChild(edgeLayer);
+
+  const nodeLayer = createSvgElement("g");
+  nodeLayer.classList.add("dependency-graph-nodes");
+  for (const node of layout.nodes) {
+    nodeLayer.appendChild(createDependencyGraphNode(node));
+  }
+  svg.appendChild(nodeLayer);
+
+  canvas.appendChild(svg);
+  container.appendChild(canvas);
+  codeViewElement.appendChild(container);
+}
+
+function createDependencyGraphNode(node) {
+  const group = createSvgElement("g");
+  const nodeTone = node.status === "unchanged" ? "unchanged" : getChangeKindForFile(node);
+  group.classList.add("dependency-graph-node", `change-${nodeTone}`);
+  group.setAttribute("transform", `translate(${node.x}, ${node.y})`);
+
+  const title = createSvgElement("title");
+  title.textContent = `${node.filePath} | ${node.touchedSymbolCount} touched declarations`;
+  group.appendChild(title);
+
+  const rect = createSvgElement("rect");
+  rect.classList.add("dependency-graph-node-rect");
+  rect.setAttribute("width", String(node.width));
+  rect.setAttribute("height", String(node.height));
+  rect.setAttribute("rx", "7");
+  group.appendChild(rect);
+
+  const fileName = createSvgElement("text");
+  fileName.classList.add("dependency-graph-node-title");
+  fileName.setAttribute("x", "14");
+  fileName.setAttribute("y", "26");
+  fileName.textContent = truncateMiddle(fileNameForPath(node.filePath), 26);
+  group.appendChild(fileName);
+
+  const count = createSvgElement("text");
+  count.classList.add("dependency-graph-node-count");
+  count.setAttribute("x", "14");
+  count.setAttribute("y", "46");
+  count.textContent = `${node.touchedSymbolCount} touched`;
+  group.appendChild(count);
+
+  return group;
+}
+
+function createDependencyGraphDirectory(directory) {
+  const group = createSvgElement("g");
+  group.classList.add("dependency-graph-directory");
+  group.setAttribute("transform", `translate(${directory.x}, ${directory.y})`);
+
+  const title = createSvgElement("title");
+  title.textContent = `${directory.path} | ${directory.fileCount} files`;
+  group.appendChild(title);
+
+  const rect = createSvgElement("rect");
+  rect.classList.add("dependency-graph-directory-rect");
+  rect.setAttribute("width", String(directory.width));
+  rect.setAttribute("height", String(directory.height));
+  rect.setAttribute("rx", "10");
+  group.appendChild(rect);
+
+  const label = createSvgElement("text");
+  label.classList.add("dependency-graph-directory-label");
+  label.setAttribute("x", "14");
+  label.setAttribute("y", "19");
+  label.textContent = truncateMiddle(directory.path, 30);
+  group.appendChild(label);
+
+  return group;
+}
+
+function pathFromGraphPoints(points) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return "";
+  }
+
+  const [first, ...rest] = points;
+  const commands = [`M ${first.x} ${first.y}`];
+  for (const point of rest) {
+    commands.push(`L ${point.x} ${point.y}`);
+  }
+  return commands.join(" ");
+}
+
+function createSvgElement(name) {
+  return document.createElementNS("http://www.w3.org/2000/svg", name);
+}
+
+function truncateMiddle(value, maxLength) {
+  if (typeof value !== "string" || value.length <= maxLength) {
+    return value;
+  }
+
+  const sideLength = Math.max(1, Math.floor((maxLength - 3) / 2));
+  return `${value.slice(0, sideLength)}...${value.slice(value.length - sideLength)}`;
 }
 
 function renderFile(filePath, target) {

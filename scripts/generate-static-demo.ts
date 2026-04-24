@@ -61,7 +61,8 @@ function sanitizeBundle(bundle: StaticReviewBundle, repoName: string): StaticRev
   return {
     bootstrap: sanitizeBootstrap(bundle.bootstrap, repoName),
     fileContentsByPath: bundle.fileContentsByPath,
-    usagesBySymbolId: bundle.usagesBySymbolId
+    usagesBySymbolId: bundle.usagesBySymbolId,
+    dependencyGraph: bundle.dependencyGraph
   };
 }
 
@@ -179,6 +180,7 @@ async function writeStaticDemo(options: {
   await fs.writeFile(path.join(dataRoot, "bootstrap.json"), `${JSON.stringify(options.bundle.bootstrap, null, 2)}\n`);
   await fs.writeFile(path.join(dataRoot, "file-contents.json"), `${JSON.stringify(options.bundle.fileContentsByPath, null, 2)}\n`);
   await fs.writeFile(path.join(dataRoot, "usages.json"), `${JSON.stringify(options.bundle.usagesBySymbolId, null, 2)}\n`);
+  await fs.writeFile(path.join(dataRoot, "dependency-graph.json"), `${JSON.stringify(options.bundle.dependencyGraph, null, 2)}\n`);
 }
 
 function buildStaticDemoHtml(
@@ -202,6 +204,7 @@ function buildMockApiScript(): string {
     "  const bootstrapUrl = new URL(\"./data/bootstrap.json\", window.location.href).toString();",
     "  const fileContentsUrl = new URL(\"./data/file-contents.json\", window.location.href).toString();",
     "  const usagesUrl = new URL(\"./data/usages.json\", window.location.href).toString();",
+    "  const dependencyGraphUrl = new URL(\"./data/dependency-graph.json\", window.location.href).toString();",
     "  let bootstrapPromise = null;",
     "  let fileContentsPromise = null;",
     "  let usagesPromise = null;",
@@ -226,6 +229,10 @@ function buildMockApiScript(): string {
     "        return jsonResponse(404, { error: \"File not found.\" });",
     "      }",
     "      return jsonResponse(200, { filePath, content: fileContentsByPath[filePath] });",
+    "    }",
+    "",
+    "    if (requestUrl.pathname === \"/api/dependency-graph\") {",
+    "      return originalFetch(dependencyGraphUrl);",
     "    }",
     "",
     "    if (requestUrl.pathname === \"/api/usages\") {",

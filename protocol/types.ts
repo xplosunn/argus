@@ -58,6 +58,24 @@ export interface BootstrapResponse {
   symbols: SymbolSummary[];
 }
 
+export interface ReviewDependencyGraphNode {
+  id: string;
+  filePath: string;
+  status: ChangeStatus | "unchanged";
+  touchedSymbolCount: number;
+}
+
+export interface ReviewDependencyGraphEdge {
+  id: string;
+  sourceFilePath: string;
+  targetFilePath: string;
+}
+
+export interface ReviewDependencyGraph {
+  nodes: ReviewDependencyGraphNode[];
+  edges: ReviewDependencyGraphEdge[];
+}
+
 export interface FileContentResponse {
   filePath: string;
   content: string | null;
@@ -83,4 +101,5 @@ export interface StaticReviewBundle {
   bootstrap: BootstrapResponse;
   fileContentsByPath: Record<string, string | null>;
   usagesBySymbolId: Record<string, UsagesResponse>;
+  dependencyGraph: ReviewDependencyGraph;
 }

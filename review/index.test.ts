@@ -230,6 +230,101 @@ describe("review/index internals", () => {
     expect(sorted.map((item) => item.id)).toEqual(["a1a", "a1b", "a2", "b"]);
   });
 
+  it("builds a cross-file dependency graph from all displayed usages", () => {
+    const symbolA = makeSymbol({
+      id: "symbol-a",
+      name: "a",
+      declaration: { filePath: "src/a.ts", line: 1, column: 1 }
+    });
+    const symbolB = makeSymbol({
+      id: "symbol-b",
+      name: "b",
+      declaration: { filePath: "src/b.ts", line: 1, column: 1 }
+    });
+
+    const graph = reviewInternal.buildReviewDependencyGraph(
+      {
+        review: {
+          repoRoot: "demo-repo",
+          defaultBranch: "origin/main",
+          baseSha: "abc123",
+          headSha: "def456",
+          mode: "branch-diff",
+          generatedAt: "2026-03-24T00:00:00.000Z"
+        },
+        files: [
+          { path: "src/a.ts", status: "modified", changedRanges: [], content: null, patch: null },
+          { path: "src/b.ts", status: "modified", changedRanges: [], content: null, patch: null }
+        ],
+        symbols: [symbolA, symbolB]
+      },
+      (symbolId) => {
+        if (symbolId === "symbol-a") {
+          return {
+            symbol: symbolA,
+            usages: [
+              {
+                location: { filePath: "src/a.ts", line: 1, column: 1 },
+                isDefinition: true,
+                isInDiff: true,
+                preview: "export function a() {}"
+              },
+              {
+                location: { filePath: "src/b.ts", line: 4, column: 3 },
+                isDefinition: false,
+                isInDiff: true,
+                preview: "a();"
+              },
+              {
+                location: { filePath: "src/c.ts", line: 4, column: 3 },
+                isDefinition: false,
+                isInDiff: false,
+                preview: "a();"
+              }
+            ]
+          };
+        }
+
+        return {
+          symbol: symbolB,
+          usages: [
+            {
+              location: { filePath: "src/a.ts", line: 3, column: 3 },
+              isDefinition: false,
+              isInDiff: true,
+              preview: "b();"
+            },
+            {
+              location: { filePath: "src/a.ts", line: 4, column: 3 },
+              isDefinition: false,
+              isInDiff: true,
+              preview: "b();"
+            },
+            {
+              location: { filePath: "src/b.ts", line: 4, column: 3 },
+              isDefinition: false,
+              isInDiff: true,
+              preview: "b();"
+            }
+          ]
+        };
+      }
+    );
+
+    expect(graph).toEqual({
+      nodes: [
+        { id: "src/a.ts", filePath: "src/a.ts", status: "modified", touchedSymbolCount: 1 },
+        { id: "src/b.ts", filePath: "src/b.ts", status: "modified", touchedSymbolCount: 1 },
+        { id: "src/c.ts", filePath: "src/c.ts", status: "unchanged", touchedSymbolCount: 0 }
+      ],
+      edges: [
+        { id: "src/a.ts->src/b.ts", sourceFilePath: "src/a.ts", targetFilePath: "src/b.ts" },
+        { id: "src/b.ts->src/a.ts", sourceFilePath: "src/b.ts", targetFilePath: "src/a.ts" },
+        { id: "src/c.ts->src/a.ts", sourceFilePath: "src/c.ts", targetFilePath: "src/a.ts" }
+      ]
+    });
+  });
+
   it("builds a static review bundle when every symbol has usages data", () => {
     const one = makeSymbol({ id: "one", name: "one" });
     const two = makeSymbol({ id: "two", name: "two" });
@@ -279,6 +374,12 @@ describe("review/index internals", () => {
           symbol: two,
           usages: []
         };
+      },
+      getDependencyGraph() {
+        return {
+          nodes: [],
+          edges: []
+        };
       }
     };
 
@@ -307,6 +408,10 @@ describe("review/index internals", () => {
           symbol: two,
           usages: []
         }
+      },
+      dependencyGraph: {
+        nodes: [],
+        edges: []
       }
     });
   });

@@ -235,6 +235,16 @@ body.pane-resizing {
   font-weight: 700;
 }
 
+.review-map-item {
+  border-color: var(--border);
+  background: #fbf7ef;
+  margin-bottom: 10px;
+}
+
+.review-map-item .symbol-title {
+  font-weight: 700;
+}
+
 .symbol-row {
   display: flex;
   align-items: center;
@@ -448,6 +458,92 @@ body.pane-resizing {
 .empty {
   color: var(--muted);
   padding: 12px;
+}
+
+.dependency-graph-view {
+  min-width: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px 12px 12px;
+  gap: 10px;
+}
+
+.dependency-graph-summary {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dependency-graph-canvas {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.dependency-graph-svg {
+  display: block;
+  width: max-content;
+  height: max-content;
+  background: #fffdf8;
+}
+
+.dependency-graph-edge {
+  fill: none;
+  stroke: #8d8176;
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.dependency-graph-arrow {
+  fill: #8d8176;
+}
+
+.dependency-graph-directory-rect {
+  fill: #f5f1e9;
+  stroke: #d7cec1;
+  stroke-width: 1.2;
+}
+
+.dependency-graph-directory-label {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dependency-graph-node-rect {
+  fill: #fbf7ef;
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.dependency-graph-node.change-added .dependency-graph-node-rect {
+  stroke: var(--entry-add);
+}
+
+.dependency-graph-node.change-removed .dependency-graph-node-rect {
+  stroke: var(--entry-remove);
+}
+
+.dependency-graph-node.change-modified .dependency-graph-node-rect {
+  stroke: var(--entry-modify);
+}
+
+.dependency-graph-node.change-unchanged .dependency-graph-node-rect {
+  fill: #f7f4ee;
+  stroke: #b7aea2;
+  stroke-dasharray: 4 3;
+}
+
+.dependency-graph-node-title {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dependency-graph-node-count {
+  fill: var(--muted);
+  font-size: 11px;
 }
 
 @media (max-width: 980px) {

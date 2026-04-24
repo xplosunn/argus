@@ -58,6 +58,11 @@ export async function startWebServer(options: StartWebServerOptions): Promise<Ru
       return;
     }
 
+    if (method === "GET" && url.pathname === "/api/dependency-graph") {
+      sendJson(response, 200, options.session.getDependencyGraph());
+      return;
+    }
+
     if (method === "POST" && url.pathname === "/api/usages") {
       const rawBody = await readBody(request);
       let payload: UsagesRequest;

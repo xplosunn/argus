@@ -4,6 +4,8 @@ import type {
   BootstrapResponse,
   ChangedFile,
   FileContentResponse,
+  ReviewDependencyGraph,
+  ReviewDependencyGraphNode,
   StaticReviewBundle,
   SymbolSummary,
   UsagesResponse
@@ -34,6 +36,7 @@ export interface ReviewSession {
   bootstrap: BootstrapResponse;
   getFileContent(filePath: string): FileContentResponse | null;
   getUsages(symbolId: string): UsagesResponse | null;
+  getDependencyGraph(): ReviewDependencyGraph;
 }
 
 export function createStaticReviewBundle(options: CreateReviewSessionOptions): StaticReviewBundle {
@@ -109,6 +112,23 @@ export function createReviewSession(options: CreateReviewSessionOptions): Review
     })),
     symbols
   };
+  let dependencyGraph: ReviewDependencyGraph | null = null;
+  const getUsagesForSymbol = (symbolId: string): UsagesResponse | null => {
+    const analyzerResult = analyzer?.getUsages(symbolId);
+    if (analyzerResult) {
+      return analyzerResult;
+    }
+
+    const fallbackSymbol = fallbackSymbolMap.get(symbolId);
+    if (!fallbackSymbol) {
+      return null;
+    }
+
+    return {
+      symbol: fallbackSymbol,
+      usages: []
+    };
+  };
 
   return {
     bootstrap,
@@ -122,21 +142,10 @@ export function createReviewSession(options: CreateReviewSessionOptions): Review
         content: fileContentByPath.get(filePath) ?? null
       };
     },
-    getUsages(symbolId: string): UsagesResponse | null {
-      const analyzerResult = analyzer?.getUsages(symbolId);
-      if (analyzerResult) {
-        return analyzerResult;
-      }
-
-      const fallbackSymbol = fallbackSymbolMap.get(symbolId);
-      if (!fallbackSymbol) {
-        return null;
-      }
-
-      return {
-        symbol: fallbackSymbol,
-        usages: []
-      };
+    getUsages: getUsagesForSymbol,
+    getDependencyGraph(): ReviewDependencyGraph {
+      dependencyGraph ??= buildReviewDependencyGraph(bootstrap, getUsagesForSymbol);
+      return dependencyGraph;
     }
   };
 }
@@ -457,6 +466,86 @@ function compareSymbols(left: SymbolSummary, right: SymbolSummary): number {
   return left.declaration.column - right.declaration.column;
 }
 
+function buildReviewDependencyGraph(
+  bootstrap: BootstrapResponse,
+  getUsages: (symbolId: string) => UsagesResponse | null
+): ReviewDependencyGraph {
+  const fileByPath = new Map(bootstrap.files.map((file) => [file.path, file]));
+  const touchedSymbolCountByFilePath = new Map<string, number>();
+  const graphFilePaths = new Set(bootstrap.files.map((file) => file.path));
+
+  for (const symbol of bootstrap.symbols) {
+    if (symbol.kind === "file") {
+      continue;
+    }
+
+    const filePath = symbol.declaration.filePath;
+    touchedSymbolCountByFilePath.set(filePath, (touchedSymbolCountByFilePath.get(filePath) ?? 0) + 1);
+  }
+
+  const edgeKeys = new Set<string>();
+
+  for (const symbol of bootstrap.symbols) {
+    if (symbol.kind === "file") {
+      continue;
+    }
+
+    const targetFilePath = symbol.declaration.filePath;
+    if (!fileByPath.has(targetFilePath)) {
+      continue;
+    }
+
+    const usages = getUsages(symbol.id);
+    if (!usages) {
+      continue;
+    }
+
+    for (const usage of usages.usages) {
+      const sourceFilePath = usage.location.filePath;
+      if (!sourceFilePath || sourceFilePath === targetFilePath) {
+        continue;
+      }
+
+      graphFilePaths.add(sourceFilePath);
+      const key = `${sourceFilePath}\0${targetFilePath}`;
+      edgeKeys.add(key);
+    }
+  }
+
+  const nodes: ReviewDependencyGraphNode[] = [...graphFilePaths]
+    .sort((left, right) => left.localeCompare(right))
+    .map((filePath) => {
+      const file = fileByPath.get(filePath);
+      return {
+        id: filePath,
+        filePath,
+        status: file ? file.status : "unchanged",
+        touchedSymbolCount: touchedSymbolCountByFilePath.get(filePath) ?? 0
+      };
+    });
+
+  const edges = [...edgeKeys]
+    .map((key) => {
+      const [sourceFilePath, targetFilePath] = key.split("\0");
+      return {
+        id: `${sourceFilePath}->${targetFilePath}`,
+        sourceFilePath,
+        targetFilePath
+      };
+    })
+    .sort((left, right) => {
+      if (left.sourceFilePath !== right.sourceFilePath) {
+        return left.sourceFilePath.localeCompare(right.sourceFilePath);
+      }
+      return left.targetFilePath.localeCompare(right.targetFilePath);
+    });
+
+  return {
+    nodes,
+    edges
+  };
+}
+
 function buildStaticReviewBundle(session: ReviewSession): StaticReviewBundle {
   const fileContentsByPath: Record<string, string | null> = {};
   const usagesBySymbolId: Record<string, UsagesResponse> = {};
@@ -482,7 +571,8 @@ function buildStaticReviewBundle(session: ReviewSession): StaticReviewBundle {
   return {
     bootstrap: session.bootstrap,
     fileContentsByPath,
-    usagesBySymbolId
+    usagesBySymbolId,
+    dependencyGraph: buildReviewDependencyGraph(session.bootstrap, (symbolId) => usagesBySymbolId[symbolId] ?? null)
   };
 }
 
@@ -497,5 +587,6 @@ export const __internal = {
   parseRemovedChunks,
   normalizeRemovalAnchorLine,
   countContentLines,
-  compareSymbols
+  compareSymbols,
+  buildReviewDependencyGraph
 };
