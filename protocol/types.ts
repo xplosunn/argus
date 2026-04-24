@@ -62,7 +62,6 @@ export interface ReviewDependencyGraphNode {
   id: string;
   filePath: string;
   status: ChangeStatus | "unchanged";
-  touchedSymbolCount: number;
 }
 
 export interface ReviewDependencyGraphEdge {

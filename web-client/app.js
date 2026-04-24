@@ -1,4 +1,5 @@
 import {
+  assignDependencyEdgePorts as assignDependencyEdgePortsLogic,
   clampAnchorLine as clampAnchorLineLogic,
   compareFilesForSortMode as compareFilesForSortModeLogic,
   countReferences as countReferencesLogic,
@@ -7,6 +8,7 @@ import {
   countUsagesInDiff as countUsagesInDiffLogic,
   filterLocalSymbolsForTopLevel as filterLocalSymbolsForTopLevelLogic,
   fileNameForPath as fileNameForPathLogic,
+  fitDependencyGraphLayoutToBounds as fitDependencyGraphLayoutToBoundsLogic,
   folderForPath as folderForPathLogic,
   formatLineNumber as formatLineNumberLogic,
   getChangeKindForFile as getChangeKindForFileLogic,
@@ -18,8 +20,10 @@ import {
   isLineInTargetSelection as isLineInTargetSelectionLogic,
   markerForRowType as markerForRowTypeLogic,
   normalizeChangeKind as normalizeChangeKindLogic,
+  nextDependencyEdgeLaneMeta as nextDependencyEdgeLaneMetaLogic,
   normalizeSortMode as normalizeSortModeLogic,
   normalizeTargetSelection as normalizeTargetSelectionLogic,
+  pointsForDependencyEdge as pointsForDependencyEdgeLogic,
   parseUnifiedPatch as parseUnifiedPatchLogic
 } from "./logic.js";
 
@@ -620,10 +624,7 @@ function normalizeDependencyGraphForRendering(graph) {
     .filter((node) => typeof node?.filePath === "string" && node.filePath.length > 0)
     .map((node) => ({
       ...node,
-      id: node.filePath,
-      touchedSymbolCount: Number.isFinite(Number(node.touchedSymbolCount))
-        ? Math.max(0, Math.trunc(Number(node.touchedSymbolCount)))
-        : 0
+      id: node.filePath
     }))
     .sort((left, right) => left.filePath.localeCompare(right.filePath));
   const nodeFilePaths = new Set(nodes.map((node) => node.filePath));
@@ -660,7 +661,7 @@ function normalizeDependencyGraphForRendering(graph) {
 
 async function layoutDependencyGraph(graph) {
   const nodeWidth = 220;
-  const nodeHeight = 62;
+  const nodeHeight = 44;
   const directoryPaddingX = 14;
   const directoryPaddingTop = 28;
   const directoryPaddingBottom = 14;
@@ -672,10 +673,16 @@ async function layoutDependencyGraph(graph) {
   const directoryWidth = nodeWidth + directoryPaddingX * 2;
   const laidOutNodes = [];
   const laidOutDirectories = [];
+  const columnLayouts = [];
   let maxBottom = 0;
 
   for (const [column, directories] of columns.entries()) {
     const columnX = 28 + column * (directoryWidth + columnGap);
+    columnLayouts.push({
+      index: column,
+      x: columnX,
+      width: directoryWidth
+    });
     let currentY = 28;
 
     for (const directory of directories) {
@@ -692,13 +699,15 @@ async function layoutDependencyGraph(graph) {
         y: currentY,
         width: directoryWidth,
         height: directoryHeight,
-        fileCount: directory.nodes.length
+        fileCount: directory.nodes.length,
+        columnIndex: column
       });
 
       for (const [row, node] of directory.nodes.entries()) {
         laidOutNodes.push({
           ...node,
           directoryPath: directory.path,
+          columnIndex: column,
           x: columnX + directoryPaddingX,
           y: currentY + directoryPaddingTop + row * (nodeHeight + fileGap),
           width: nodeWidth,
@@ -713,10 +722,12 @@ async function layoutDependencyGraph(graph) {
 
   const nodeById = new Map(laidOutNodes.map((node) => [node.id, node]));
   const directoryByPath = new Map(laidOutDirectories.map((directory) => [directory.path, directory]));
-  const pairLaneCountsByKey = new Map();
-  const sameDirectoryLaneCountsByKey = new Map();
+  const laneState = {
+    columnOuterLaneCountsByKey: new Map(),
+    gutterLaneCountsByKey: new Map()
+  };
 
-  const laidOutEdges = graph.edges.map((edge) => {
+  const edgeDrafts = graph.edges.map((edge) => {
     const source = nodeById.get(edge.sourceFilePath);
     const target = nodeById.get(edge.targetFilePath);
     const sourceDirectory = source ? directoryByPath.get(source.directoryPath) : null;
@@ -724,31 +735,62 @@ async function layoutDependencyGraph(graph) {
 
     if (!source || !target || !sourceDirectory || !targetDirectory) {
       return {
-        ...edge,
+        edge,
+        source: null,
+        target: null,
+        sourceDirectory: null,
+        targetDirectory: null,
+        laneMeta: null
+      };
+    }
+
+    return {
+      edge,
+      source,
+      target,
+      sourceDirectory,
+      targetDirectory,
+      laneMeta: nextDependencyEdgeLaneMeta(
+        source,
+        sourceDirectory,
+        target,
+        targetDirectory,
+        columnLayouts.length,
+        laneState
+      )
+    };
+  });
+  const edgePortMeta = assignDependencyEdgePorts(edgeDrafts);
+
+  const laidOutEdges = edgeDrafts.map((edgeDraft, edgeIndex) => {
+    if (!edgeDraft.source || !edgeDraft.target || !edgeDraft.sourceDirectory || !edgeDraft.targetDirectory) {
+      return {
+        ...edgeDraft.edge,
         points: []
       };
     }
 
-    const laneMeta = nextDependencyEdgeLaneMeta(
-      sourceDirectory,
-      targetDirectory,
-      pairLaneCountsByKey,
-      sameDirectoryLaneCountsByKey
-    );
-
     return {
-      ...edge,
-      points: pointsForDependencyEdge(source, sourceDirectory, target, targetDirectory, laneMeta)
+      ...edgeDraft.edge,
+      points: pointsForDependencyEdge(
+        edgeDraft.source,
+        edgeDraft.sourceDirectory,
+        edgeDraft.target,
+        edgeDraft.targetDirectory,
+        columnLayouts,
+        edgeDraft.laneMeta,
+        edgePortMeta[edgeIndex]
+      )
     };
   });
 
-  return {
+  return fitDependencyGraphLayoutToBounds({
     width: Math.max(320, 56 + columns.length * directoryWidth + Math.max(0, columns.length - 1) * columnGap),
     height: Math.max(220, maxBottom + 28),
     directories: laidOutDirectories,
     nodes: laidOutNodes,
     edges: laidOutEdges
-  };
+  });
 }
 
 function rankDependencyGraphNodes(graph) {
@@ -807,9 +849,6 @@ function groupDirectoriesByRank(nodes, rankByNodeId) {
       if (leftRank !== rightRank) {
         return leftRank - rightRank;
       }
-      if (left.touchedSymbolCount !== right.touchedSymbolCount) {
-        return right.touchedSymbolCount - left.touchedSymbolCount;
-      }
       return left.filePath.localeCompare(right.filePath);
     });
 
@@ -823,83 +862,6 @@ function groupDirectoriesByRank(nodes, rankByNodeId) {
     .map(([, directories]) =>
       directories.sort((left, right) => left.path.localeCompare(right.path))
     );
-}
-
-function pointsForDependencyEdge(source, sourceDirectory, target, targetDirectory, laneMeta) {
-  const sourceY = source.y + source.height / 2;
-  const targetY = target.y + target.height / 2;
-  const laneOffset = 18;
-  const laneSpacing = 18;
-
-  if (sourceDirectory.path === targetDirectory.path) {
-    const sourceX = source.x + source.width;
-    const targetX = target.x + target.width;
-    const laneX = sourceDirectory.x + sourceDirectory.width + laneOffset + laneMeta.sameDirectoryLaneIndex * laneSpacing;
-
-    return [
-      { x: sourceX, y: sourceY },
-      { x: laneX, y: sourceY },
-      { x: laneX, y: targetY },
-      { x: targetX, y: targetY }
-    ];
-  }
-
-  const targetIsToRight = targetDirectory.x >= sourceDirectory.x;
-
-  if (targetIsToRight) {
-    const sourceX = source.x + source.width;
-    const targetX = target.x;
-    const sourceLaneX = sourceDirectory.x + sourceDirectory.width + laneOffset + laneMeta.pairLaneIndex * laneSpacing;
-    const targetLaneX = targetDirectory.x - laneOffset - laneMeta.pairLaneIndex * laneSpacing;
-
-    return [
-      { x: sourceX, y: sourceY },
-      { x: sourceLaneX, y: sourceY },
-      { x: sourceLaneX, y: targetY },
-      { x: targetLaneX, y: targetY },
-      { x: targetX, y: targetY }
-    ];
-  }
-
-  const sourceX = source.x;
-  const targetX = target.x + target.width;
-  const sourceLaneX = sourceDirectory.x - laneOffset - laneMeta.pairLaneIndex * laneSpacing;
-  const targetLaneX = targetDirectory.x + targetDirectory.width + laneOffset + laneMeta.pairLaneIndex * laneSpacing;
-
-  return [
-    { x: sourceX, y: sourceY },
-    { x: sourceLaneX, y: sourceY },
-    { x: sourceLaneX, y: targetY },
-    { x: targetLaneX, y: targetY },
-    { x: targetX, y: targetY }
-  ];
-}
-
-function nextDependencyEdgeLaneMeta(
-  sourceDirectory,
-  targetDirectory,
-  pairLaneCountsByKey,
-  sameDirectoryLaneCountsByKey
-) {
-  if (sourceDirectory.path === targetDirectory.path) {
-    const laneKey = `${sourceDirectory.path}\0loop-right`;
-    const sameDirectoryLaneIndex = sameDirectoryLaneCountsByKey.get(laneKey) ?? 0;
-    sameDirectoryLaneCountsByKey.set(laneKey, sameDirectoryLaneIndex + 1);
-    return {
-      sameDirectoryLaneIndex,
-      sourceLaneIndex: 0,
-      targetLaneIndex: 0
-    };
-  }
-
-  const pairKey = [sourceDirectory.path, targetDirectory.path].sort().join("\0");
-  const pairLaneIndex = pairLaneCountsByKey.get(pairKey) ?? 0;
-  pairLaneCountsByKey.set(pairKey, pairLaneIndex + 1);
-
-  return {
-    sameDirectoryLaneIndex: 0,
-    pairLaneIndex
-  };
 }
 
 function renderDependencyGraphSvg(graph, layout) {
@@ -985,7 +947,7 @@ function createDependencyGraphNode(node) {
   group.setAttribute("transform", `translate(${node.x}, ${node.y})`);
 
   const title = createSvgElement("title");
-  title.textContent = `${node.filePath} | ${node.touchedSymbolCount} touched declarations`;
+  title.textContent = node.filePath;
   group.appendChild(title);
 
   const rect = createSvgElement("rect");
@@ -998,16 +960,9 @@ function createDependencyGraphNode(node) {
   const fileName = createSvgElement("text");
   fileName.classList.add("dependency-graph-node-title");
   fileName.setAttribute("x", "14");
-  fileName.setAttribute("y", "26");
+  fileName.setAttribute("y", "27");
   fileName.textContent = truncateMiddle(fileNameForPath(node.filePath), 26);
   group.appendChild(fileName);
-
-  const count = createSvgElement("text");
-  count.classList.add("dependency-graph-node-count");
-  count.setAttribute("x", "14");
-  count.setAttribute("y", "46");
-  count.textContent = `${node.touchedSymbolCount} touched`;
-  group.appendChild(count);
 
   return group;
 }
@@ -1593,6 +1548,30 @@ function folderForPath(filePath) {
 
 function fileNameForPath(filePath) {
   return fileNameForPathLogic(filePath);
+}
+
+function nextDependencyEdgeLaneMeta(source, sourceDirectory, target, targetDirectory, columnCount, laneState) {
+  return nextDependencyEdgeLaneMetaLogic(source, sourceDirectory, target, targetDirectory, columnCount, laneState);
+}
+
+function assignDependencyEdgePorts(edgeDrafts) {
+  return assignDependencyEdgePortsLogic(edgeDrafts);
+}
+
+function fitDependencyGraphLayoutToBounds(layout) {
+  return fitDependencyGraphLayoutToBoundsLogic(layout);
+}
+
+function pointsForDependencyEdge(source, sourceDirectory, target, targetDirectory, columnLayouts, laneMeta, endpointPorts) {
+  return pointsForDependencyEdgeLogic(
+    source,
+    sourceDirectory,
+    target,
+    targetDirectory,
+    columnLayouts,
+    laneMeta,
+    endpointPorts
+  );
 }
 
 function getAllSymbolsForFile(filePath) {

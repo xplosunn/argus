@@ -313,9 +313,9 @@ describe("review/index internals", () => {
 
     expect(graph).toEqual({
       nodes: [
-        { id: "src/a.ts", filePath: "src/a.ts", status: "modified", touchedSymbolCount: 1 },
-        { id: "src/b.ts", filePath: "src/b.ts", status: "modified", touchedSymbolCount: 1 },
-        { id: "src/c.ts", filePath: "src/c.ts", status: "unchanged", touchedSymbolCount: 0 }
+        { id: "src/a.ts", filePath: "src/a.ts", status: "modified" },
+        { id: "src/b.ts", filePath: "src/b.ts", status: "modified" },
+        { id: "src/c.ts", filePath: "src/c.ts", status: "unchanged" }
       ],
       edges: [
         { id: "src/a.ts->src/b.ts", sourceFilePath: "src/a.ts", targetFilePath: "src/b.ts" },

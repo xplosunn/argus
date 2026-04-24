@@ -471,17 +471,7 @@ function buildReviewDependencyGraph(
   getUsages: (symbolId: string) => UsagesResponse | null
 ): ReviewDependencyGraph {
   const fileByPath = new Map(bootstrap.files.map((file) => [file.path, file]));
-  const touchedSymbolCountByFilePath = new Map<string, number>();
   const graphFilePaths = new Set(bootstrap.files.map((file) => file.path));
-
-  for (const symbol of bootstrap.symbols) {
-    if (symbol.kind === "file") {
-      continue;
-    }
-
-    const filePath = symbol.declaration.filePath;
-    touchedSymbolCountByFilePath.set(filePath, (touchedSymbolCountByFilePath.get(filePath) ?? 0) + 1);
-  }
 
   const edgeKeys = new Set<string>();
 
@@ -519,8 +509,7 @@ function buildReviewDependencyGraph(
       return {
         id: filePath,
         filePath,
-        status: file ? file.status : "unchanged",
-        touchedSymbolCount: touchedSymbolCountByFilePath.get(filePath) ?? 0
+        status: file ? file.status : "unchanged"
       };
     });
 

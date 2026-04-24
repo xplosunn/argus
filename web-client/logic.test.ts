@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assignDependencyEdgePorts,
   countReferences,
   SHIKI_LANGS_FALLBACK,
   clampAnchorLine,
@@ -10,6 +11,7 @@ import {
   countUsagesInDiff,
   filterLocalSymbolsForTopLevel,
   fileNameForPath,
+  fitDependencyGraphLayoutToBounds,
   folderForPath,
   formatLineNumber,
   getLineNumberColumnWidth,
@@ -21,11 +23,13 @@ import {
   groupFilesByFolder,
   isLineInTargetSelection,
   markerForRowType,
+  nextDependencyEdgeLaneMeta,
   normalizeChangeKind,
   normalizeSortMode,
   normalizeTargetSelection,
   parseRemovedEntryCounts,
   parseUnifiedPatch,
+  pointsForDependencyEdge,
   resolveShikiLanguageIdsForCurrentDiff
 } from "./logic.js";
 
@@ -171,6 +175,219 @@ describe("web-client logic helpers", () => {
     const grouped = groupFilesByFolder([{ path: "src/b.ts" }, { path: "a.ts" }, { path: "src/a.ts" }]);
     expect(grouped.map((entry) => entry.folder)).toEqual([".", "src"]);
     expect(grouped[1].files.map((entry) => entry.path)).toEqual(["src/b.ts", "src/a.ts"]);
+  });
+
+  it("balances same-column dependency edges across outer corridors", () => {
+    const laneState = {
+      columnOuterLaneCountsByKey: new Map(),
+      gutterLaneCountsByKey: new Map()
+    };
+    const columnLayouts = [
+      { index: 0, x: 28, width: 248 },
+      { index: 1, x: 372, width: 248 },
+      { index: 2, x: 716, width: 248 }
+    ];
+    const directory = {
+      path: "src",
+      x: 372,
+      width: 248,
+      columnIndex: 1
+    };
+    const source = { x: 386, y: 28, width: 220, height: 62 };
+    const lowerTarget = { x: 386, y: 100, width: 220, height: 62 };
+    const upperTarget = { x: 386, y: -44, width: 220, height: 62 };
+
+    const firstLane = nextDependencyEdgeLaneMeta(source, directory, lowerTarget, directory, columnLayouts.length, laneState);
+    expect(firstLane).toEqual({
+      route: "same-column",
+      side: "right",
+      laneIndex: 0
+    });
+    expect(pointsForDependencyEdge(source, directory, lowerTarget, directory, columnLayouts, firstLane)).toEqual([
+      { x: 606, y: 59 },
+      { x: 638, y: 59 },
+      { x: 638, y: 131 },
+      { x: 606, y: 131 }
+    ]);
+
+    const secondLane = nextDependencyEdgeLaneMeta(source, directory, upperTarget, directory, columnLayouts.length, laneState);
+    expect(secondLane).toEqual({
+      route: "same-column",
+      side: "left",
+      laneIndex: 0
+    });
+    expect(pointsForDependencyEdge(source, directory, upperTarget, directory, columnLayouts, secondLane)).toEqual([
+      { x: 386, y: 59 },
+      { x: 354, y: 59 },
+      { x: 354, y: -13 },
+      { x: 386, y: -13 }
+    ]);
+  });
+
+  it("shares gutter lanes across edges in the same column corridor", () => {
+    const laneState = {
+      columnOuterLaneCountsByKey: new Map(),
+      gutterLaneCountsByKey: new Map()
+    };
+    const columnLayouts = [
+      { index: 0, x: 28, width: 248 },
+      { index: 1, x: 372, width: 248 },
+      { index: 2, x: 716, width: 248 }
+    ];
+    const sourceDirectory = {
+      path: "src/a",
+      x: 28,
+      width: 248,
+      columnIndex: 0
+    };
+    const middleDirectory = {
+      path: "src/b",
+      x: 372,
+      width: 248,
+      columnIndex: 1
+    };
+    const farDirectory = {
+      path: "src/c",
+      x: 716,
+      width: 248,
+      columnIndex: 2
+    };
+    const source = { x: 42, y: 28, width: 220, height: 62 };
+    const middleTarget = { x: 386, y: 100, width: 220, height: 62 };
+    const farTarget = { x: 730, y: 172, width: 220, height: 62 };
+
+    const firstLane = nextDependencyEdgeLaneMeta(source, sourceDirectory, farTarget, farDirectory, columnLayouts.length, laneState);
+    expect(firstLane).toEqual({
+      route: "cross-column",
+      direction: "rightward",
+      startGutterIndex: 0,
+      endGutterIndex: 1,
+      startLaneIndex: 0,
+      endLaneIndex: 0
+    });
+
+    const secondLane = nextDependencyEdgeLaneMeta(source, sourceDirectory, middleTarget, middleDirectory, columnLayouts.length, laneState);
+    expect(secondLane).toEqual({
+      route: "cross-column",
+      direction: "rightward",
+      startGutterIndex: 0,
+      endGutterIndex: 0,
+      startLaneIndex: 1,
+      endLaneIndex: 1
+    });
+    expect(pointsForDependencyEdge(source, sourceDirectory, middleTarget, middleDirectory, columnLayouts, secondLane)).toEqual([
+      { x: 262, y: 59 },
+      { x: 336, y: 59 },
+      { x: 336, y: 131 },
+      { x: 386, y: 131 }
+    ]);
+  });
+
+  it("separates incoming and outgoing file ports on the same side", () => {
+    const columnLayouts = [
+      { index: 0, x: 28, width: 248 },
+      { index: 1, x: 372, width: 248 },
+      { index: 2, x: 716, width: 248 }
+    ];
+    const sharedDirectory = {
+      path: "src/shared",
+      x: 372,
+      width: 248,
+      columnIndex: 1
+    };
+    const rightDirectory = {
+      path: "src/right",
+      x: 716,
+      width: 248,
+      columnIndex: 2
+    };
+    const sharedNode = { id: "shared", x: 386, y: 28, width: 220, height: 62 };
+    const upperRightNode = { id: "upper", x: 730, y: -44, width: 220, height: 62 };
+    const lowerRightNode = { id: "lower", x: 730, y: 172, width: 220, height: 62 };
+    const edgeDrafts = [
+      {
+        edge: { id: "shared->upper" },
+        source: sharedNode,
+        target: upperRightNode,
+        sourceDirectory: sharedDirectory,
+        targetDirectory: rightDirectory,
+        laneMeta: {
+          route: "cross-column",
+          direction: "rightward",
+          startGutterIndex: 1,
+          endGutterIndex: 1,
+          startLaneIndex: 0,
+          endLaneIndex: 0
+        }
+      },
+      {
+        edge: { id: "lower->shared" },
+        source: lowerRightNode,
+        target: sharedNode,
+        sourceDirectory: rightDirectory,
+        targetDirectory: sharedDirectory,
+        laneMeta: {
+          route: "cross-column",
+          direction: "leftward",
+          startGutterIndex: 1,
+          endGutterIndex: 1,
+          startLaneIndex: 0,
+          endLaneIndex: 0
+        }
+      }
+    ];
+
+    const edgePorts = assignDependencyEdgePorts(edgeDrafts);
+    expect(edgePorts[0]).toEqual({
+      sourcePortIndex: 0,
+      sourcePortCount: 2,
+      targetPortIndex: 0,
+      targetPortCount: 1
+    });
+    expect(edgePorts[1]).toEqual({
+      sourcePortIndex: 0,
+      sourcePortCount: 1,
+      targetPortIndex: 1,
+      targetPortCount: 2
+    });
+
+    const outgoingPoints = pointsForDependencyEdge(
+      sharedNode,
+      sharedDirectory,
+      upperRightNode,
+      rightDirectory,
+      columnLayouts,
+      edgeDrafts[0].laneMeta,
+      edgePorts[0]
+    );
+    const incomingPoints = pointsForDependencyEdge(
+      lowerRightNode,
+      rightDirectory,
+      sharedNode,
+      sharedDirectory,
+      columnLayouts,
+      edgeDrafts[1].laneMeta,
+      edgePorts[1]
+    );
+
+    expect(outgoingPoints[0]).toMatchObject({ x: 606 });
+    expect(incomingPoints[incomingPoints.length - 1]).toMatchObject({ x: 606 });
+    expect(outgoingPoints[0].y).toBeLessThan(incomingPoints[incomingPoints.length - 1].y);
+  });
+
+  it("expands and shifts dependency graph layouts to keep left-overflowing edges visible", () => {
+    const fitted = fitDependencyGraphLayoutToBounds({
+      width: 320,
+      height: 220,
+      directories: [{ id: "src", path: "src", x: 28, y: 28, width: 248, height: 104 }],
+      nodes: [{ id: "src/a.ts", filePath: "src/a.ts", x: 42, y: 56, width: 220, height: 62 }],
+      edges: [{ id: "edge", points: [{ x: -12, y: 87 }, { x: 42, y: 87 }] }]
+    });
+
+    expect(fitted.width).toBe(360);
+    expect(fitted.directories[0].x).toBe(68);
+    expect(fitted.nodes[0].x).toBe(82);
+    expect(fitted.edges[0].points[0]).toEqual({ x: 28, y: 87 });
   });
 
   it("classifies change kinds for files and symbols", () => {

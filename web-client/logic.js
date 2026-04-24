@@ -377,6 +377,250 @@ export function fileNameForPath(filePath) {
   return normalizedPath.slice(lastSlash + 1);
 }
 
+export function nextDependencyEdgeLaneMeta(source, sourceDirectory, target, targetDirectory, columnCount, laneState) {
+  const sourceColumnIndex = Number(sourceDirectory?.columnIndex);
+  const targetColumnIndex = Number(targetDirectory?.columnIndex);
+  if (!Number.isInteger(sourceColumnIndex) || !Number.isInteger(targetColumnIndex)) {
+    return null;
+  }
+
+  if (sourceColumnIndex === targetColumnIndex) {
+    const side = chooseSameColumnDependencyEdgeSide(
+      source,
+      target,
+      sourceColumnIndex,
+      columnCount,
+      laneState?.columnOuterLaneCountsByKey
+    );
+    const laneIndex = consumeDependencyLaneIndex(
+      laneState?.columnOuterLaneCountsByKey,
+      `${sourceColumnIndex}\0${side}`
+    );
+    return {
+      route: "same-column",
+      side,
+      laneIndex
+    };
+  }
+
+  const direction = targetColumnIndex > sourceColumnIndex ? "rightward" : "leftward";
+  const startGutterIndex = direction === "rightward" ? sourceColumnIndex : sourceColumnIndex - 1;
+  const endGutterIndex = direction === "rightward" ? targetColumnIndex - 1 : targetColumnIndex;
+  if (startGutterIndex < 0 || endGutterIndex < 0 || startGutterIndex === endGutterIndex) {
+    const laneIndex = consumeDependencyLaneIndex(
+      laneState?.gutterLaneCountsByKey,
+      `${Math.max(startGutterIndex, endGutterIndex)}\0${direction}`
+    );
+    return {
+      route: "cross-column",
+      direction,
+      startGutterIndex: Math.max(startGutterIndex, endGutterIndex),
+      endGutterIndex: Math.max(startGutterIndex, endGutterIndex),
+      startLaneIndex: laneIndex,
+      endLaneIndex: laneIndex
+    };
+  }
+
+  return {
+    route: "cross-column",
+    direction,
+    startGutterIndex,
+    endGutterIndex,
+    startLaneIndex: consumeDependencyLaneIndex(
+      laneState?.gutterLaneCountsByKey,
+      `${startGutterIndex}\0${direction}`
+    ),
+    endLaneIndex: consumeDependencyLaneIndex(
+      laneState?.gutterLaneCountsByKey,
+      `${endGutterIndex}\0${direction}`
+    )
+  };
+}
+
+export function assignDependencyEdgePorts(edges) {
+  const edgePortMeta = (edges ?? []).map(() => ({
+    sourcePortIndex: 0,
+    sourcePortCount: 1,
+    targetPortIndex: 0,
+    targetPortCount: 1
+  }));
+  const endpointsByNodeSideKey = new Map();
+
+  for (const [edgeIndex, edge] of (edges ?? []).entries()) {
+    const sourceSide = dependencyEdgeEndpointSide(edge?.laneMeta, "source");
+    if (edge?.source && sourceSide) {
+      const endpointKey = `${edge.source.id}\0${sourceSide}`;
+      const endpoints = endpointsByNodeSideKey.get(endpointKey) ?? [];
+      endpoints.push({
+        edgeIndex,
+        role: "source",
+        nodeId: edge.source.id,
+        peerY: edge.target ? edge.target.y + edge.target.height / 2 : edge.source.y + edge.source.height / 2,
+        edgeId: edge.edge?.id ?? String(edgeIndex)
+      });
+      endpointsByNodeSideKey.set(endpointKey, endpoints);
+    }
+
+    const targetSide = dependencyEdgeEndpointSide(edge?.laneMeta, "target");
+    if (edge?.target && targetSide) {
+      const endpointKey = `${edge.target.id}\0${targetSide}`;
+      const endpoints = endpointsByNodeSideKey.get(endpointKey) ?? [];
+      endpoints.push({
+        edgeIndex,
+        role: "target",
+        nodeId: edge.target.id,
+        peerY: edge.source ? edge.source.y + edge.source.height / 2 : edge.target.y + edge.target.height / 2,
+        edgeId: edge.edge?.id ?? String(edgeIndex)
+      });
+      endpointsByNodeSideKey.set(endpointKey, endpoints);
+    }
+  }
+
+  for (const endpoints of endpointsByNodeSideKey.values()) {
+    endpoints.sort(compareDependencyEdgeEndpoints);
+    const portCount = endpoints.length;
+
+    for (const [portIndex, endpoint] of endpoints.entries()) {
+      const meta = edgePortMeta[endpoint.edgeIndex];
+      if (endpoint.role === "source") {
+        meta.sourcePortIndex = portIndex;
+        meta.sourcePortCount = portCount;
+        continue;
+      }
+
+      meta.targetPortIndex = portIndex;
+      meta.targetPortCount = portCount;
+    }
+  }
+
+  return edgePortMeta;
+}
+
+export function fitDependencyGraphLayoutToBounds(layout, options = {}) {
+  const padding = Number.isFinite(Number(options.padding))
+    ? Math.max(0, Math.trunc(Number(options.padding)))
+    : 28;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  const includePoint = (x, y) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return;
+    }
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  };
+
+  for (const directory of layout?.directories ?? []) {
+    includePoint(directory?.x, directory?.y);
+    includePoint(
+      Number(directory?.x) + Number(directory?.width),
+      Number(directory?.y) + Number(directory?.height)
+    );
+  }
+
+  for (const node of layout?.nodes ?? []) {
+    includePoint(node?.x, node?.y);
+    includePoint(Number(node?.x) + Number(node?.width), Number(node?.y) + Number(node?.height));
+  }
+
+  for (const edge of layout?.edges ?? []) {
+    for (const point of edge?.points ?? []) {
+      includePoint(point?.x, point?.y);
+    }
+  }
+
+  const widthFloor = Math.max(320, Math.trunc(Number(layout?.width) || 0));
+  const heightFloor = Math.max(220, Math.trunc(Number(layout?.height) || 0));
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return {
+      ...layout,
+      width: widthFloor,
+      height: heightFloor
+    };
+  }
+
+  const shiftX = Math.max(0, padding - minX);
+  const shiftY = Math.max(0, padding - minY);
+
+  return {
+    ...layout,
+    width: Math.max(widthFloor + shiftX, maxX + shiftX + padding),
+    height: Math.max(heightFloor + shiftY, maxY + shiftY + padding),
+    directories: (layout?.directories ?? []).map((directory) => ({
+      ...directory,
+      x: directory.x + shiftX,
+      y: directory.y + shiftY
+    })),
+    nodes: (layout?.nodes ?? []).map((node) => ({
+      ...node,
+      x: node.x + shiftX,
+      y: node.y + shiftY
+    })),
+    edges: (layout?.edges ?? []).map((edge) => ({
+      ...edge,
+      points: (edge?.points ?? []).map((point) => ({
+        x: point.x + shiftX,
+        y: point.y + shiftY
+      }))
+    }))
+  };
+}
+
+export function pointsForDependencyEdge(source, sourceDirectory, target, targetDirectory, columnLayouts, laneMeta, endpointPorts = null) {
+  const sourceY = dependencyNodePortY(source, endpointPorts?.sourcePortIndex, endpointPorts?.sourcePortCount);
+  const targetY = dependencyNodePortY(target, endpointPorts?.targetPortIndex, endpointPorts?.targetPortCount);
+  const outerLaneOffset = 18;
+  const outerLaneSpacing = 16;
+  const gutterLaneSpacing = 12;
+
+  if (!laneMeta) {
+    return [];
+  }
+
+  if (laneMeta.route === "same-column") {
+    const useLeftSide = laneMeta.side === "left";
+    const sourceX = useLeftSide ? source.x : source.x + source.width;
+    const targetX = useLeftSide ? target.x : target.x + target.width;
+    const laneX = useLeftSide
+      ? sourceDirectory.x - outerLaneOffset - laneMeta.laneIndex * outerLaneSpacing
+      : sourceDirectory.x + sourceDirectory.width + outerLaneOffset + laneMeta.laneIndex * outerLaneSpacing;
+
+    return [
+      { x: sourceX, y: sourceY },
+      { x: laneX, y: sourceY },
+      { x: laneX, y: targetY },
+      { x: targetX, y: targetY }
+    ];
+  }
+
+  const startGutterX = dependencyGutterCenterX(columnLayouts, laneMeta.startGutterIndex, laneMeta.startLaneIndex, gutterLaneSpacing);
+  const endGutterX = dependencyGutterCenterX(columnLayouts, laneMeta.endGutterIndex, laneMeta.endLaneIndex, gutterLaneSpacing);
+  if (startGutterX === null || endGutterX === null) {
+    return [];
+  }
+
+  const direction = laneMeta.direction === "leftward" ? "leftward" : "rightward";
+  const sourceX = direction === "rightward" ? source.x + source.width : source.x;
+  const targetX = direction === "rightward" ? target.x : target.x + target.width;
+  const points = [
+    { x: sourceX, y: sourceY },
+    { x: startGutterX, y: sourceY },
+    { x: startGutterX, y: targetY }
+  ];
+
+  if (endGutterX !== startGutterX) {
+    points.push({ x: endGutterX, y: targetY });
+  }
+
+  points.push({ x: targetX, y: targetY });
+  return points;
+}
+
 export function getChangeKindForFile(file) {
   const status = String(file?.status ?? "modified");
 
@@ -563,4 +807,120 @@ export function countUsagesInDiff(usages) {
 
 export function countReferences(usages) {
   return (Array.isArray(usages) ? usages : []).filter((usage) => usage?.isDefinition !== true).length;
+}
+
+function chooseSameColumnDependencyEdgeSide(source, target, columnIndex, columnCount, laneCountsByKey) {
+  const leftCount = readDependencyLaneCount(laneCountsByKey, `${columnIndex}\0left`);
+  const rightCount = readDependencyLaneCount(laneCountsByKey, `${columnIndex}\0right`);
+  if (leftCount !== rightCount) {
+    return leftCount < rightCount ? "left" : "right";
+  }
+
+  const sourceY = Number(source?.y) + Number(source?.height ?? 0) / 2;
+  const targetY = Number(target?.y) + Number(target?.height ?? 0) / 2;
+  if (targetY < sourceY) {
+    return "left";
+  }
+  if (targetY > sourceY) {
+    return "right";
+  }
+
+  if (columnIndex === 0) {
+    return "left";
+  }
+  if (columnIndex === Math.max(0, columnCount - 1)) {
+    return "right";
+  }
+  return "right";
+}
+
+function consumeDependencyLaneIndex(laneCountsByKey, key) {
+  if (!(laneCountsByKey instanceof Map)) {
+    return 0;
+  }
+
+  const laneIndex = laneCountsByKey.get(key) ?? 0;
+  laneCountsByKey.set(key, laneIndex + 1);
+  return laneIndex;
+}
+
+function readDependencyLaneCount(laneCountsByKey, key) {
+  if (!(laneCountsByKey instanceof Map)) {
+    return 0;
+  }
+  return laneCountsByKey.get(key) ?? 0;
+}
+
+function dependencyEdgeEndpointSide(laneMeta, role) {
+  if (!laneMeta) {
+    return null;
+  }
+
+  if (laneMeta.route === "same-column") {
+    return laneMeta.side === "left" ? "left" : "right";
+  }
+
+  if (laneMeta.direction === "leftward") {
+    return role === "source" ? "left" : "right";
+  }
+
+  return role === "source" ? "right" : "left";
+}
+
+function dependencyNodePortY(node, portIndex, portCount) {
+  const nodeTop = Number(node?.y);
+  const nodeHeight = Number(node?.height);
+  if (!Number.isFinite(nodeTop) || !Number.isFinite(nodeHeight)) {
+    return 0;
+  }
+
+  const centerY = nodeTop + nodeHeight / 2;
+  const normalizedPortCount = Number.isFinite(portCount) ? Math.max(1, Math.trunc(portCount)) : 1;
+  if (normalizedPortCount === 1) {
+    return centerY;
+  }
+
+  const normalizedPortIndex = Number.isFinite(portIndex)
+    ? Math.max(0, Math.min(normalizedPortCount - 1, Math.trunc(portIndex)))
+    : Math.floor(normalizedPortCount / 2);
+  const inset = Math.min(14, Math.max(8, nodeHeight * 0.22), nodeHeight / 2);
+  const availableHeight = Math.max(0, nodeHeight - inset * 2);
+  if (availableHeight === 0) {
+    return centerY;
+  }
+
+  return nodeTop + inset + normalizedPortIndex * (availableHeight / Math.max(1, normalizedPortCount - 1));
+}
+
+function dependencyGutterCenterX(columnLayouts, gutterIndex, laneIndex, laneSpacing) {
+  if (!Array.isArray(columnLayouts) || gutterIndex < 0 || gutterIndex >= columnLayouts.length - 1) {
+    return null;
+  }
+
+  const leftColumn = columnLayouts[gutterIndex];
+  const rightColumn = columnLayouts[gutterIndex + 1];
+  const gutterCenterX = (leftColumn.x + leftColumn.width + rightColumn.x) / 2;
+  return gutterCenterX + dependencyLaneOffset(laneIndex, laneSpacing);
+}
+
+function dependencyLaneOffset(laneIndex, laneSpacing) {
+  if (!Number.isFinite(laneIndex) || laneIndex <= 0) {
+    return 0;
+  }
+
+  const magnitude = Math.ceil(laneIndex / 2) * laneSpacing;
+  return laneIndex % 2 === 1 ? magnitude : -magnitude;
+}
+
+function compareDependencyEdgeEndpoints(left, right) {
+  if (left.peerY !== right.peerY) {
+    return left.peerY - right.peerY;
+  }
+  if (left.role !== right.role) {
+    return left.role.localeCompare(right.role);
+  }
+  if (left.nodeId !== right.nodeId) {
+    return left.nodeId.localeCompare(right.nodeId);
+  }
+  return String(left.edgeId).localeCompare(String(right.edgeId));
 }

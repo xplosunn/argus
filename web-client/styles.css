@@ -541,11 +541,6 @@ body.pane-resizing {
   font-weight: 700;
 }
 
-.dependency-graph-node-count {
-  fill: var(--muted);
-  font-size: 11px;
-}
-
 @media (max-width: 980px) {
   .layout {
     overflow-x: auto;
