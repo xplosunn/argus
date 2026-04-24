@@ -13,6 +13,7 @@ import {
   formatLineNumber as formatLineNumberLogic,
   getChangeKindForFile as getChangeKindForFileLogic,
   getChangeKindForSymbolPure,
+  groupDirectoriesByDependencyRank as groupDirectoriesByDependencyRankLogic,
   getLineNumberColumnWidth as getLineNumberColumnWidthLogic,
   getShikiLanguageCandidates as getShikiLanguageCandidatesLogic,
   getTargetSelectionForSymbol as getTargetSelectionForSymbolLogic,
@@ -668,8 +669,7 @@ async function layoutDependencyGraph(graph) {
   const directoryGap = 20;
   const fileGap = 10;
   const columnGap = 96;
-  const ranksByNodeId = rankDependencyGraphNodes(graph);
-  const columns = groupDirectoriesByRank(graph.nodes, ranksByNodeId);
+  const columns = groupDirectoriesByDependencyRank(graph);
   const directoryWidth = nodeWidth + directoryPaddingX * 2;
   const laidOutNodes = [];
   const laidOutDirectories = [];
@@ -791,77 +791,6 @@ async function layoutDependencyGraph(graph) {
     nodes: laidOutNodes,
     edges: laidOutEdges
   });
-}
-
-function rankDependencyGraphNodes(graph) {
-  const rankByNodeId = new Map(graph.nodes.map((node) => [node.id, 0]));
-  const incomingByNodeId = new Map(graph.nodes.map((node) => [node.id, []]));
-  const outgoingByNodeId = new Map(graph.nodes.map((node) => [node.id, []]));
-
-  for (const edge of graph.edges) {
-    incomingByNodeId.get(edge.targetFilePath)?.push(edge.sourceFilePath);
-    outgoingByNodeId.get(edge.sourceFilePath)?.push(edge.targetFilePath);
-  }
-
-  const queue = graph.nodes
-    .filter((node) => (incomingByNodeId.get(node.id) ?? []).length === 0)
-    .map((node) => node.id);
-  const visited = new Set(queue);
-
-  for (let index = 0; index < queue.length; index += 1) {
-    const nodeId = queue[index];
-    const nextRank = (rankByNodeId.get(nodeId) ?? 0) + 1;
-
-    for (const targetNodeId of outgoingByNodeId.get(nodeId) ?? []) {
-      rankByNodeId.set(targetNodeId, Math.max(rankByNodeId.get(targetNodeId) ?? 0, nextRank));
-      if (!visited.has(targetNodeId)) {
-        visited.add(targetNodeId);
-        queue.push(targetNodeId);
-      }
-    }
-  }
-
-  // Cycles do not have a natural left-to-right rank. Keep cyclic or otherwise
-  // unreached nodes stable instead of waiting for a graph layout dependency.
-  return rankByNodeId;
-}
-
-function groupDirectoriesByRank(nodes, rankByNodeId) {
-  const directoriesByPath = new Map();
-  for (const node of nodes) {
-    const directoryPath = folderForPath(node.filePath);
-    const rank = rankByNodeId.get(node.id) ?? 0;
-    const directory = directoriesByPath.get(directoryPath) ?? {
-      path: directoryPath,
-      rank,
-      nodes: []
-    };
-    directory.rank = Math.min(directory.rank, rank);
-    directory.nodes.push(node);
-    directoriesByPath.set(directoryPath, directory);
-  }
-
-  const columnsByRank = new Map();
-  for (const directory of directoriesByPath.values()) {
-    directory.nodes.sort((left, right) => {
-      const leftRank = rankByNodeId.get(left.id) ?? 0;
-      const rightRank = rankByNodeId.get(right.id) ?? 0;
-      if (leftRank !== rightRank) {
-        return leftRank - rightRank;
-      }
-      return left.filePath.localeCompare(right.filePath);
-    });
-
-    const column = columnsByRank.get(directory.rank) ?? [];
-    column.push(directory);
-    columnsByRank.set(directory.rank, column);
-  }
-
-  return [...columnsByRank.entries()]
-    .sort(([leftRank], [rightRank]) => leftRank - rightRank)
-    .map(([, directories]) =>
-      directories.sort((left, right) => left.path.localeCompare(right.path))
-    );
 }
 
 function renderDependencyGraphSvg(graph, layout) {
@@ -1540,6 +1469,10 @@ function isFileExpanded(filePath) {
 
 function groupFilesByFolder(files) {
   return groupFilesByFolderLogic(files);
+}
+
+function groupDirectoriesByDependencyRank(graph) {
+  return groupDirectoriesByDependencyRankLogic(graph);
 }
 
 function folderForPath(filePath) {

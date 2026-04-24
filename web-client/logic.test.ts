@@ -20,6 +20,7 @@ import {
   getChangeKindForSymbolPure,
   getShikiLanguageCandidates,
   getTargetSelectionForSymbol,
+  groupDirectoriesByDependencyRank,
   groupFilesByFolder,
   isLineInTargetSelection,
   markerForRowType,
@@ -175,6 +176,44 @@ describe("web-client logic helpers", () => {
     const grouped = groupFilesByFolder([{ path: "src/b.ts" }, { path: "a.ts" }, { path: "src/a.ts" }]);
     expect(grouped.map((entry) => entry.folder)).toEqual([".", "src"]);
     expect(grouped[1].files.map((entry) => entry.path)).toEqual(["src/b.ts", "src/a.ts"]);
+  });
+
+  it("ranks directories from their external dependencies instead of their earliest file", () => {
+    const columns = groupDirectoriesByDependencyRank({
+      nodes: [
+        { id: "src/a.ts", filePath: "src/a.ts" },
+        { id: "src/b.ts", filePath: "src/b.ts" },
+        { id: "lib/c.ts", filePath: "lib/c.ts" }
+      ],
+      edges: [{ id: "src/b.ts->lib/c.ts", sourceFilePath: "src/b.ts", targetFilePath: "lib/c.ts" }]
+    });
+
+    expect(columns.map((directories) => directories.map((directory) => directory.path))).toEqual([["lib"], ["src"]]);
+    expect(columns[1][0].nodes.map((node) => node.filePath)).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("dumps every remaining directory into the next rank when dependencies are blocked", () => {
+    const columns = groupDirectoriesByDependencyRank({
+      nodes: [
+        { id: "foundation/leaf.ts", filePath: "foundation/leaf.ts" },
+        { id: "feature/app.ts", filePath: "feature/app.ts" },
+        { id: "cycle-a/a.ts", filePath: "cycle-a/a.ts" },
+        { id: "cycle-b/b.ts", filePath: "cycle-b/b.ts" },
+        { id: "dependent/c.ts", filePath: "dependent/c.ts" }
+      ],
+      edges: [
+        { id: "feature/app.ts->foundation/leaf.ts", sourceFilePath: "feature/app.ts", targetFilePath: "foundation/leaf.ts" },
+        { id: "cycle-a/a.ts->cycle-b/b.ts", sourceFilePath: "cycle-a/a.ts", targetFilePath: "cycle-b/b.ts" },
+        { id: "cycle-b/b.ts->cycle-a/a.ts", sourceFilePath: "cycle-b/b.ts", targetFilePath: "cycle-a/a.ts" },
+        { id: "dependent/c.ts->cycle-a/a.ts", sourceFilePath: "dependent/c.ts", targetFilePath: "cycle-a/a.ts" }
+      ]
+    });
+
+    expect(columns.map((directories) => directories.map((directory) => directory.path))).toEqual([
+      ["foundation"],
+      ["feature"],
+      ["cycle-a", "cycle-b", "dependent"]
+    ]);
   });
 
   it("balances same-column dependency edges across outer corridors", () => {

@@ -356,6 +356,79 @@ export function groupFilesByFolder(files) {
     }));
 }
 
+export function groupDirectoriesByDependencyRank(graph) {
+  const directoriesByPath = new Map();
+
+  for (const node of graph?.nodes ?? []) {
+    if (typeof node?.filePath !== "string" || node.filePath.length === 0) {
+      continue;
+    }
+
+    const directoryPath = folderForPath(node.filePath);
+    const directory = directoriesByPath.get(directoryPath) ?? {
+      path: directoryPath,
+      nodes: []
+    };
+    directory.nodes.push(node);
+    directoriesByPath.set(directoryPath, directory);
+  }
+
+  for (const directory of directoriesByPath.values()) {
+    directory.nodes.sort((left, right) => left.filePath.localeCompare(right.filePath));
+  }
+
+  const dependencyPathsByDirectory = new Map(
+    [...directoriesByPath.keys()].map((directoryPath) => [directoryPath, new Set()])
+  );
+
+  for (const edge of graph?.edges ?? []) {
+    if (typeof edge?.sourceFilePath !== "string" || typeof edge?.targetFilePath !== "string") {
+      continue;
+    }
+
+    const sourceDirectoryPath = folderForPath(edge.sourceFilePath);
+    const targetDirectoryPath = folderForPath(edge.targetFilePath);
+    if (
+      sourceDirectoryPath === targetDirectoryPath ||
+      !directoriesByPath.has(sourceDirectoryPath) ||
+      !directoriesByPath.has(targetDirectoryPath)
+    ) {
+      continue;
+    }
+
+    dependencyPathsByDirectory.get(sourceDirectoryPath)?.add(targetDirectoryPath);
+  }
+
+  const remainingDirectoryPaths = new Set(directoriesByPath.keys());
+  const columns = [];
+
+  while (remainingDirectoryPaths.size > 0) {
+    const nextRankPaths = [...remainingDirectoryPaths]
+      .filter((directoryPath) => {
+        const dependencyPaths = dependencyPathsByDirectory.get(directoryPath) ?? new Set();
+        for (const dependencyPath of dependencyPaths) {
+          if (remainingDirectoryPaths.has(dependencyPath)) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((left, right) => left.localeCompare(right));
+
+    const columnPaths =
+      nextRankPaths.length > 0
+        ? nextRankPaths
+        : [...remainingDirectoryPaths].sort((left, right) => left.localeCompare(right));
+
+    columns.push(columnPaths.map((directoryPath) => directoriesByPath.get(directoryPath)));
+    for (const directoryPath of columnPaths) {
+      remainingDirectoryPaths.delete(directoryPath);
+    }
+  }
+
+  return columns;
+}
+
 export function folderForPath(filePath) {
   const lastSlash = filePath.lastIndexOf("/");
   if (lastSlash === -1) {
