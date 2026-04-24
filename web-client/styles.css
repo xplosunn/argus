@@ -469,12 +469,6 @@ body.pane-resizing {
   gap: 10px;
 }
 
-.dependency-graph-summary {
-  color: var(--muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
 .dependency-graph-canvas {
   flex: 1;
   min-height: 0;

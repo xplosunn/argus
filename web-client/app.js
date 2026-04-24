@@ -799,11 +799,6 @@ function renderDependencyGraphSvg(graph, layout) {
   const container = document.createElement("div");
   container.className = "dependency-graph-view";
 
-  const summary = document.createElement("div");
-  summary.className = "dependency-graph-summary";
-  summary.textContent = `${layout.directories?.length ?? 0} directories | ${graph.nodes.length} files | ${graph.edges.length} cross-file links`;
-  container.appendChild(summary);
-
   if (graph.nodes.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty";
