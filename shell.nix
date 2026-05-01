@@ -4,10 +4,10 @@
 
 pkgs.mkShell {
   buildInputs = [
-    pkgs.bun
     pkgs.git
     pkgs.nodejs
     pkgs.nodePackages_latest.pnpm
-    pkgs.mariadb
+    # rust
+    pkgs.rustc
   ];
 }
