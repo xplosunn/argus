@@ -543,6 +543,16 @@ body.pane-resizing {
   stroke-width: 1.2;
 }
 
+.dependency-graph-node {
+  cursor: pointer;
+}
+
+.dependency-graph-node:hover .dependency-graph-node-rect,
+.dependency-graph-node:focus-visible .dependency-graph-node-rect {
+  fill: #f6ecdc;
+  stroke-width: 1.4;
+}
+
 .dependency-graph-node.change-added .dependency-graph-node-rect {
   stroke: var(--entry-add);
 }
@@ -559,6 +569,10 @@ body.pane-resizing {
   fill: #f7f4ee;
   stroke: #b7aea2;
   stroke-dasharray: 4 3;
+}
+
+.dependency-graph-node.is-hidden .dependency-graph-node-rect {
+  fill: #efe4d1;
 }
 
 .dependency-graph-node-title {

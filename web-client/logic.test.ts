@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assignDependencyEdgePorts,
+  clearHiddenDependencySourceFilePathsForDirectory,
   countReferences,
   SHIKI_LANGS_FALLBACK,
   clampAnchorLine,
@@ -240,6 +241,46 @@ describe("web-client logic helpers", () => {
     );
 
     expect(visibleEdges.map((edge) => edge.id)).toEqual(["from-c-to-a"]);
+  });
+
+  it("hides only outgoing arrows for files with hidden sources", () => {
+    const visibleEdges = filterDependencyGraphEdgesForHiddenSources(
+      [
+        {
+          id: "from-a-to-b",
+          sourceFilePath: "pkg/a/from-a.ts",
+          sourceDirectoryPath: "pkg/a",
+          targetDirectoryPath: "pkg/b"
+        },
+        {
+          id: "from-a-to-c",
+          sourceFilePath: "pkg/a/from-c.ts",
+          sourceDirectoryPath: "pkg/a",
+          targetDirectoryPath: "pkg/c"
+        },
+        {
+          id: "from-d-to-a",
+          sourceFilePath: "pkg/d/from-d.ts",
+          sourceDirectoryPath: "pkg/d",
+          targetDirectoryPath: "pkg/a"
+        }
+      ],
+      {
+        directoryPaths: new Set(),
+        filePaths: new Set(["pkg/a/from-a.ts"])
+      }
+    );
+
+    expect(visibleEdges.map((edge) => edge.id)).toEqual(["from-a-to-c", "from-d-to-a"]);
+  });
+
+  it("clears hidden file sources when showing a directory again", () => {
+    const hiddenFilePaths = clearHiddenDependencySourceFilePathsForDirectory(
+      new Set(["pkg/a/from-a.ts", "pkg/a/from-b.ts", "pkg/c/from-c.ts", "root.ts"]),
+      "pkg/a"
+    );
+
+    expect([...hiddenFilePaths]).toEqual(["pkg/c/from-c.ts", "root.ts"]);
   });
 
   it("balances same-column dependency edges across outer corridors", () => {

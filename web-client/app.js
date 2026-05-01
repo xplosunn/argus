@@ -1,6 +1,7 @@
 import {
   assignDependencyEdgePorts as assignDependencyEdgePortsLogic,
   clampAnchorLine as clampAnchorLineLogic,
+  clearHiddenDependencySourceFilePathsForDirectory as clearHiddenDependencySourceFilePathsForDirectoryLogic,
   compareFilesForSortMode as compareFilesForSortModeLogic,
   countReferences as countReferencesLogic,
   compareSymbols as compareSymbolsLogic,
@@ -40,6 +41,7 @@ const state = {
   dependencyGraphRequest: null,
   dependencyGraphLayout: null,
   hiddenDependencySourceDirectoryPaths: new Set(),
+  hiddenDependencySourceFilePaths: new Set(),
   sortMode: "usages",
   usagesBySymbolId: new Map(),
   usageInDiffCountBySymbolId: new Map(),
@@ -851,7 +853,10 @@ function renderDependencyGraphSvg(graph, layout) {
 
   const visibleEdges = filterDependencyGraphEdgesForHiddenSources(
     layout.edges,
-    state.hiddenDependencySourceDirectoryPaths
+    {
+      directoryPaths: state.hiddenDependencySourceDirectoryPaths,
+      filePaths: state.hiddenDependencySourceFilePaths
+    }
   );
   const edgeLayer = createSvgElement("g");
   edgeLayer.classList.add("dependency-graph-edges");
@@ -880,10 +885,19 @@ function createDependencyGraphNode(node) {
   const group = createSvgElement("g");
   const nodeTone = node.status === "unchanged" ? "unchanged" : getChangeKindForFile(node);
   group.classList.add("dependency-graph-node", `change-${nodeTone}`);
+  const isHidden = state.hiddenDependencySourceFilePaths.has(node.filePath);
+  if (isHidden) {
+    group.classList.add("is-hidden");
+  }
   group.setAttribute("transform", `translate(${node.x}, ${node.y})`);
+  group.setAttribute("role", "button");
+  group.setAttribute("tabindex", "0");
+  group.setAttribute("aria-label", `${isHidden ? "Show" : "Hide"} outgoing arrows for ${node.filePath}`);
+  group.setAttribute("aria-pressed", String(isHidden));
+  group.dataset.filePath = node.filePath;
 
   const title = createSvgElement("title");
-  title.textContent = node.filePath;
+  title.textContent = `${node.filePath}\n${isHidden ? "Show outgoing arrows" : "Hide outgoing arrows"}`;
   group.appendChild(title);
 
   const rect = createSvgElement("rect");
@@ -899,6 +913,23 @@ function createDependencyGraphNode(node) {
   fileName.setAttribute("y", "27");
   fileName.textContent = truncateMiddle(fileNameForPath(node.filePath), 26);
   group.appendChild(fileName);
+
+  const toggle = () => {
+    toggleDependencyGraphSourceFileVisibility(node.filePath);
+  };
+  group.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggle();
+  });
+  group.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    toggle();
+  });
 
   return group;
 }
@@ -990,13 +1021,34 @@ function createDependencyGraphDirectoryToggle(directory) {
 function toggleDependencyGraphSourceDirectoryVisibility(directoryPath) {
   if (state.hiddenDependencySourceDirectoryPaths.has(directoryPath)) {
     state.hiddenDependencySourceDirectoryPaths.delete(directoryPath);
+    state.hiddenDependencySourceFilePaths = clearHiddenDependencySourceFilePathsForDirectory(
+      state.hiddenDependencySourceFilePaths,
+      directoryPath
+    );
   } else {
     state.hiddenDependencySourceDirectoryPaths.add(directoryPath);
   }
-  rerenderStoredDependencyGraphPreservingScroll(directoryPath);
+  rerenderStoredDependencyGraphPreservingScroll({
+    selector: ".dependency-graph-directory-toggle",
+    datasetKey: "directoryPath",
+    path: directoryPath
+  });
 }
 
-function rerenderStoredDependencyGraphPreservingScroll(focusDirectoryPath = null) {
+function toggleDependencyGraphSourceFileVisibility(filePath) {
+  if (state.hiddenDependencySourceFilePaths.has(filePath)) {
+    state.hiddenDependencySourceFilePaths.delete(filePath);
+  } else {
+    state.hiddenDependencySourceFilePaths.add(filePath);
+  }
+  rerenderStoredDependencyGraphPreservingScroll({
+    selector: ".dependency-graph-node",
+    datasetKey: "filePath",
+    path: filePath
+  });
+}
+
+function rerenderStoredDependencyGraphPreservingScroll(focusTarget = null) {
   if (!state.dependencyGraph || !state.dependencyGraphLayout || state.selectedView !== "dependency-graph") {
     return;
   }
@@ -1007,13 +1059,13 @@ function rerenderStoredDependencyGraphPreservingScroll(focusDirectoryPath = null
   codeViewElement.scrollLeft = scrollLeft;
   codeViewElement.scrollTop = scrollTop;
 
-  if (!focusDirectoryPath) {
+  if (!focusTarget?.selector || typeof focusTarget.datasetKey !== "string" || typeof focusTarget.path !== "string") {
     return;
   }
 
-  for (const toggle of codeViewElement.querySelectorAll(".dependency-graph-directory-toggle")) {
-    if (toggle instanceof SVGElement && toggle.dataset.directoryPath === focusDirectoryPath) {
-      toggle.focus();
+  for (const element of codeViewElement.querySelectorAll(focusTarget.selector)) {
+    if (element instanceof SVGElement && element.dataset[focusTarget.datasetKey] === focusTarget.path) {
+      element.focus();
       break;
     }
   }
@@ -1592,8 +1644,12 @@ function fitDependencyGraphLayoutToBounds(layout) {
   return fitDependencyGraphLayoutToBoundsLogic(layout);
 }
 
-function filterDependencyGraphEdgesForHiddenSources(edges, hiddenSourceDirectoryPaths) {
-  return filterDependencyGraphEdgesForHiddenSourcesLogic(edges, hiddenSourceDirectoryPaths);
+function filterDependencyGraphEdgesForHiddenSources(edges, hiddenSources) {
+  return filterDependencyGraphEdgesForHiddenSourcesLogic(edges, hiddenSources);
+}
+
+function clearHiddenDependencySourceFilePathsForDirectory(hiddenSourceFilePaths, directoryPath) {
+  return clearHiddenDependencySourceFilePathsForDirectoryLogic(hiddenSourceFilePaths, directoryPath);
 }
 
 function pointsForDependencyEdge(source, sourceDirectory, target, targetDirectory, columnLayouts, laneMeta, endpointPorts) {

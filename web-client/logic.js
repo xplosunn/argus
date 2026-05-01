@@ -429,17 +429,52 @@ export function groupDirectoriesByDependencyRank(graph) {
   return columns;
 }
 
-export function filterDependencyGraphEdgesForHiddenSources(edges, hiddenSourceDirectoryPaths) {
-  const hiddenSet =
-    hiddenSourceDirectoryPaths instanceof Set
-      ? hiddenSourceDirectoryPaths
-      : new Set(
-          (Array.isArray(hiddenSourceDirectoryPaths) ? hiddenSourceDirectoryPaths : []).filter(
-            (directoryPath) => typeof directoryPath === "string" && directoryPath.length > 0
-          )
-        );
+function normalizeHiddenDependencySourcePaths(hiddenSources) {
+  if (hiddenSources && typeof hiddenSources === "object" && !Array.isArray(hiddenSources) && !(hiddenSources instanceof Set)) {
+    return {
+      directoryPaths: normalizeHiddenDependencySourcePathSet(hiddenSources.directoryPaths),
+      filePaths: normalizeHiddenDependencySourcePathSet(hiddenSources.filePaths)
+    };
+  }
 
-  return (edges ?? []).filter((edge) => !hiddenSet.has(edge?.sourceDirectoryPath));
+  return {
+    directoryPaths: normalizeHiddenDependencySourcePathSet(hiddenSources),
+    filePaths: new Set()
+  };
+}
+
+function normalizeHiddenDependencySourcePathSet(paths) {
+  if (paths instanceof Set) {
+    return paths;
+  }
+
+  return new Set(
+    (Array.isArray(paths) ? paths : []).filter((path) => typeof path === "string" && path.length > 0)
+  );
+}
+
+export function filterDependencyGraphEdgesForHiddenSources(edges, hiddenSources) {
+  const { directoryPaths, filePaths } = normalizeHiddenDependencySourcePaths(hiddenSources);
+
+  return (edges ?? []).filter(
+    (edge) => !directoryPaths.has(edge?.sourceDirectoryPath) && !filePaths.has(edge?.sourceFilePath)
+  );
+}
+
+export function clearHiddenDependencySourceFilePathsForDirectory(hiddenSourceFilePaths, directoryPath) {
+  const hiddenFilePaths = normalizeHiddenDependencySourcePathSet(hiddenSourceFilePaths);
+  if (typeof directoryPath !== "string" || directoryPath.length === 0 || hiddenFilePaths.size === 0) {
+    return new Set(hiddenFilePaths);
+  }
+
+  const nextHiddenFilePaths = new Set(hiddenFilePaths);
+  for (const filePath of hiddenFilePaths) {
+    if (folderForPath(filePath) === directoryPath) {
+      nextHiddenFilePaths.delete(filePath);
+    }
+  }
+
+  return nextHiddenFilePaths;
 }
 
 export function folderForPath(filePath) {
