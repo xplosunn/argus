@@ -4,19 +4,14 @@ import path from "node:path";
 import ts from "typescript";
 
 import type {
-  LineRange,
   SymbolKind,
   SymbolSummary,
   UsagesResponse,
   UsageRecord
 } from "../protocol";
 import { listTrackedFiles } from "../review/git";
-
-interface AnalyzerOptions {
-  repoRoot: string;
-  changedRangesByFile: ReadonlyMap<string, LineRange[]>;
-  changedFiles: readonly string[];
-}
+import { encodeSymbolId, intersectsRanges, lineInRanges, normalizePath, toRepoPath } from "./common";
+import type { AnalyzerContext, LanguageAnalyzer, LanguageSnapshot } from "./types";
 
 interface SymbolHandle {
   filePath: string;
@@ -35,20 +30,15 @@ interface DeclarationCandidate {
   declarationColumn: number;
 }
 
-export interface TypeScriptAnalyzer {
-  findTouchedSymbols(): SymbolSummary[];
-  getUsages(symbolId: string): UsagesResponse | null;
-}
-
-export function createTypeScriptAnalyzer(options: AnalyzerOptions): TypeScriptAnalyzer | null {
-  const sourceFiles = collectSourceFiles(options.repoRoot, options.changedFiles);
+export function createTypeScriptAnalyzer(context: AnalyzerContext): LanguageAnalyzer | null {
+  const sourceFiles = collectSourceFiles(context.repoRoot, context.changedFiles);
   if (sourceFiles.length === 0) {
     return null;
   }
 
-  const compilerOptions = resolveCompilerOptions(options.repoRoot);
+  const compilerOptions = resolveCompilerOptions(context.repoRoot);
   const languageService = ts.createLanguageService(
-    createLanguageServiceHost(options.repoRoot, sourceFiles, compilerOptions),
+    createLanguageServiceHost(context.repoRoot, sourceFiles, compilerOptions),
     ts.createDocumentRegistry()
   );
 
@@ -59,24 +49,28 @@ export function createTypeScriptAnalyzer(options: AnalyzerOptions): TypeScriptAn
 
   const symbolHandles = new Map<string, SymbolHandle>();
   const lineCache = new Map<string, string[]>();
+  const changedRangesByFile = new Map(context.changedFiles.map((file) => [normalizePath(file.path), file.changedRanges]));
+  const handledFiles = new Set(
+    context.changedFiles.filter((file) => isSupportedFile(file.path)).map((file) => normalizePath(file.path))
+  );
 
   return {
-    findTouchedSymbols(): SymbolSummary[] {
+    async buildSnapshot(): Promise<LanguageSnapshot> {
       const summaries: SymbolSummary[] = [];
       symbolHandles.clear();
 
-      for (const changedFile of options.changedFiles) {
-        if (!isSupportedFile(changedFile)) {
+      for (const changedFile of context.changedFiles) {
+        if (!isSupportedFile(changedFile.path)) {
           continue;
         }
 
-        const normalizedPath = normalizePath(changedFile);
-        const ranges = options.changedRangesByFile.get(normalizedPath) ?? [];
+        const normalizedPath = normalizePath(changedFile.path);
+        const ranges = changedRangesByFile.get(normalizedPath) ?? [];
         if (ranges.length === 0) {
           continue;
         }
 
-        const sourceFile = program.getSourceFile(path.resolve(options.repoRoot, changedFile));
+        const sourceFile = program.getSourceFile(path.resolve(context.repoRoot, changedFile.path));
         if (!sourceFile) {
           continue;
         }
@@ -94,7 +88,7 @@ export function createTypeScriptAnalyzer(options: AnalyzerOptions): TypeScriptAn
 
           const declarationPosition = declaration.nameNode.getStart(sourceFile);
           const topLevelPosition = topLevelNameNode.getStart(sourceFile);
-          const symbolId = encodeSymbolId(normalizedPath, declarationPosition);
+          const symbolId = encodeTypeScriptSymbolId(normalizedPath, declarationPosition);
           if (symbolHandles.has(symbolId)) {
             continue;
           }
@@ -116,7 +110,7 @@ export function createTypeScriptAnalyzer(options: AnalyzerOptions): TypeScriptAn
             },
             isDeclarationInDiff: lineInRanges(declaration.declarationLine, ranges),
             scope: isTopLevel ? "top-level" : "local",
-            topLevelSymbolId: isTopLevel ? null : encodeSymbolId(normalizedPath, topLevelPosition)
+            topLevelSymbolId: isTopLevel ? null : encodeTypeScriptSymbolId(normalizedPath, topLevelPosition)
           };
 
           symbolHandles.set(symbolId, {
@@ -135,81 +129,105 @@ export function createTypeScriptAnalyzer(options: AnalyzerOptions): TypeScriptAn
         if (left.declaration.line !== right.declaration.line) {
           return left.declaration.line - right.declaration.line;
         }
+        if (left.declaration.column !== right.declaration.column) {
+          return left.declaration.column - right.declaration.column;
+        }
         return left.name.localeCompare(right.name);
       });
 
-      return summaries;
-    },
-
-    getUsages(symbolId: string): UsagesResponse | null {
-      const handle = symbolHandles.get(symbolId);
-      if (!handle) {
-        return null;
+      const usagesBySymbolId = new Map<string, UsagesResponse>();
+      for (const [symbolId, handle] of symbolHandles) {
+        usagesBySymbolId.set(
+          symbolId,
+          buildUsagesResponse(
+            context.repoRoot,
+            changedRangesByFile,
+            languageService,
+            program,
+            handle,
+            lineCache
+          )
+        );
       }
-
-      const absoluteFilePath = path.resolve(options.repoRoot, handle.filePath);
-      const references = languageService.findReferences(absoluteFilePath, handle.position);
-      const usages: UsageRecord[] = [];
-      const seen = new Set<string>();
-
-      for (const referencedSymbol of references ?? []) {
-        for (const reference of referencedSymbol.references) {
-          const sourceFile = program.getSourceFile(reference.fileName);
-          if (!sourceFile) {
-            continue;
-          }
-
-          const filePath = toRepoPath(options.repoRoot, reference.fileName);
-          const lineAndChar = sourceFile.getLineAndCharacterOfPosition(reference.textSpan.start);
-          const line = lineAndChar.line + 1;
-          const column = lineAndChar.character + 1;
-
-          const dedupeKey = [
-            filePath,
-            String(line),
-            String(column),
-            reference.isDefinition ? "1" : "0"
-          ].join(":");
-          if (seen.has(dedupeKey)) {
-            continue;
-          }
-          seen.add(dedupeKey);
-
-          usages.push({
-            location: {
-              filePath,
-              line,
-              column
-            },
-            isDefinition: Boolean(reference.isDefinition),
-            isInDiff: lineInRanges(line, options.changedRangesByFile.get(filePath) ?? []),
-            preview: getLinePreview(options.repoRoot, lineCache, filePath, line)
-          });
-        }
-      }
-
-      usages.sort((left, right) => {
-        if (left.location.filePath !== right.location.filePath) {
-          return left.location.filePath.localeCompare(right.location.filePath);
-        }
-        if (left.location.line !== right.location.line) {
-          return left.location.line - right.location.line;
-        }
-        if (left.location.column !== right.location.column) {
-          return left.location.column - right.location.column;
-        }
-        return Number(left.isDefinition) - Number(right.isDefinition);
-      });
 
       return {
-        symbol: handle.summary,
-        usages
+        handledFiles,
+        symbols: summaries,
+        usagesBySymbolId
       };
     }
   };
 }
 
-function collectSourceFiles(repoRoot: string, changedFiles: readonly string[]): string[] {
+function buildUsagesResponse(
+  repoRoot: string,
+  changedRangesByFile: ReadonlyMap<string, readonly { startLine: number; endLine: number }[]>,
+  languageService: ts.LanguageService,
+  program: ts.Program,
+  handle: SymbolHandle,
+  lineCache: Map<string, string[]>
+): UsagesResponse {
+  const absoluteFilePath = path.resolve(repoRoot, handle.filePath);
+  const references = languageService.findReferences(absoluteFilePath, handle.position);
+  const usages: UsageRecord[] = [];
+  const seen = new Set<string>();
+
+  for (const referencedSymbol of references ?? []) {
+    for (const reference of referencedSymbol.references) {
+      const sourceFile = program.getSourceFile(reference.fileName);
+      if (!sourceFile) {
+        continue;
+      }
+
+      const filePath = toRepoPath(repoRoot, reference.fileName);
+      const lineAndChar = sourceFile.getLineAndCharacterOfPosition(reference.textSpan.start);
+      const line = lineAndChar.line + 1;
+      const column = lineAndChar.character + 1;
+
+      const dedupeKey = [
+        filePath,
+        String(line),
+        String(column),
+        reference.isDefinition ? "1" : "0"
+      ].join(":");
+      if (seen.has(dedupeKey)) {
+        continue;
+      }
+      seen.add(dedupeKey);
+
+      usages.push({
+        location: {
+          filePath,
+          line,
+          column
+        },
+        isDefinition: Boolean(reference.isDefinition),
+        isInDiff: lineInRanges(line, changedRangesByFile.get(filePath) ?? []),
+        preview: getLinePreview(repoRoot, lineCache, filePath, line)
+      });
+    }
+  }
+
+  usages.sort((left, right) => {
+    if (left.location.filePath !== right.location.filePath) {
+      return left.location.filePath.localeCompare(right.location.filePath);
+    }
+    if (left.location.line !== right.location.line) {
+      return left.location.line - right.location.line;
+    }
+    if (left.location.column !== right.location.column) {
+      return left.location.column - right.location.column;
+    }
+    return Number(left.isDefinition) - Number(right.isDefinition);
+  });
+
+  return {
+    symbol: handle.summary,
+    usages
+  };
+}
+
+function collectSourceFiles(repoRoot: string, changedFiles: readonly { path: string }[]): string[] {
   const tracked = listTrackedFiles(repoRoot);
   const fileSet = new Set<string>();
 
@@ -220,11 +238,11 @@ function collectSourceFiles(repoRoot: string, changedFiles: readonly string[]): 
     fileSet.add(path.resolve(repoRoot, trackedPath));
   }
 
-  for (const changedPath of changedFiles) {
-    if (!isSupportedFile(changedPath)) {
+  for (const changedFile of changedFiles) {
+    if (!isSupportedFile(changedFile.path)) {
       continue;
     }
-    const absolutePath = path.resolve(repoRoot, changedPath);
+    const absolutePath = path.resolve(repoRoot, changedFile.path);
     if (fs.existsSync(absolutePath)) {
       fileSet.add(absolutePath);
     }
@@ -522,40 +540,14 @@ function getLinePreview(
   return (lines[lineNumber - 1] ?? "").trim();
 }
 
-function lineInRanges(line: number, ranges: readonly LineRange[]): boolean {
-  for (const range of ranges) {
-    if (line >= range.startLine && line <= range.endLine) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function intersectsRanges(startLine: number, endLine: number, ranges: readonly LineRange[]): boolean {
-  for (const range of ranges) {
-    if (endLine >= range.startLine && startLine <= range.endLine) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function encodeSymbolId(filePath: string, position: number): string {
-  return Buffer.from(JSON.stringify({ filePath, position }), "utf8").toString("base64url");
-}
-
-function toRepoPath(repoRoot: string, absolutePath: string): string {
-  return normalizePath(path.relative(repoRoot, absolutePath));
-}
-
-function normalizePath(filePath: string): string {
-  return filePath.replaceAll("\\", "/");
+function encodeTypeScriptSymbolId(filePath: string, position: number): string {
+  return encodeSymbolId({ filePath, position });
 }
 
 export const __internal = {
   lineInRanges,
   intersectsRanges,
-  encodeSymbolId,
+  encodeSymbolId: encodeTypeScriptSymbolId,
   toRepoPath,
   normalizePath
 };

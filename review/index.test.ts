@@ -29,7 +29,7 @@ function makeSymbol(overrides = {}) {
 }
 
 describe("review/index internals", () => {
-  it("refuses branch reviews when uncommitted changes are present and suggests the override flag", () => {
+  it("refuses branch reviews when uncommitted changes are present and suggests the override flag", async () => {
     const { repoRoot, cleanup } = createTempRepo();
 
     try {
@@ -43,7 +43,7 @@ describe("review/index internals", () => {
 
       writeRepoFile(repoRoot, "src/app.ts", "export const value = 3;\n");
 
-      expect(() => createReviewSession({ repoRoot, defaultBranch: "main" })).toThrow(
+      await expect(createReviewSession({ repoRoot, defaultBranch: "main" })).rejects.toThrow(
         "Argus won't review main...HEAD while uncommitted changes are present on feature/editor. Commit or stash them first, or rerun with --default-branch feature/editor to review the uncommitted changes on your current branch instead."
       );
     } finally {
@@ -51,7 +51,7 @@ describe("review/index internals", () => {
     }
   });
 
-  it("allows reviewing uncommitted changes when the override points to the current branch", () => {
+  it("allows reviewing uncommitted changes when the override points to the current branch", async () => {
     const { repoRoot, cleanup } = createTempRepo();
 
     try {
@@ -62,7 +62,7 @@ describe("review/index internals", () => {
 
       writeRepoFile(repoRoot, "src/app.ts", "export const value = 2;\n");
 
-      const session = createReviewSession({
+      const session = await createReviewSession({
         repoRoot,
         defaultBranch: "feature/editor"
       });

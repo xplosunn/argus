@@ -2,8 +2,8 @@ import { expect, it } from "vitest";
 
 import { runLeftPaneScenario } from "./helpers";
 
-it("left-pane scenario: detects describe/it calls as test symbols", () => {
-  const leftPane = runLeftPaneScenario([
+it("left-pane scenario: detects describe/it calls as test symbols", async () => {
+  const leftPane = await runLeftPaneScenario([
     {
       path: "src/calc.test.ts",
       status: "modified",

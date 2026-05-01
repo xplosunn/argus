@@ -2,8 +2,8 @@ import { expect, it } from "vitest";
 
 import { runLeftPaneScenario } from "./helpers";
 
-it("left-pane scenario: no symbol when lines are changed before a function", () => {
-  const leftPane = runLeftPaneScenario([
+it("left-pane scenario: no symbol when lines are changed before a function", async () => {
+  const leftPane = await runLeftPaneScenario([
     {
       path: "src/calc.ts",
       status: "modified",

@@ -31,7 +31,7 @@ async function main(): Promise<void> {
     : path.resolve(invocationCwd);
   const repoRoot = resolveGitRepositoryRoot(requestedRepoPath);
   const clientRoot = resolveClientRoot();
-  const session = createReviewSession({
+  const session = await createReviewSession({
     repoRoot,
     defaultBranch: options.defaultBranch
   });

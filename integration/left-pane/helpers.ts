@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { ChangeStatus, ChangedFile, SymbolSummary } from "../../protocol";
-import { createTypeScriptAnalyzer } from "../../language/typescript.ts";
+import { createLanguageAnalyzers } from "../../language/index.ts";
 import {
   compareSymbols as compareUiSymbols,
   filterLocalSymbolsForTopLevel,
@@ -36,7 +36,7 @@ export interface AnnotatedFileInput {
   trailingNewline?: boolean;
 }
 
-export function runLeftPaneScenario(files: readonly AnnotatedFileInput[]): string {
+export async function runLeftPaneScenario(files: readonly AnnotatedFileInput[]): Promise<string> {
   const changedFiles = files.map((file) =>
     buildChangedFileFromAnnotated(file.path, file.status, file.annotated, {
       trailingNewline: file.trailingNewline
@@ -45,7 +45,7 @@ export function runLeftPaneScenario(files: readonly AnnotatedFileInput[]): strin
   const { repoRoot, cleanup } = createTempRepoWithFiles(changedFiles);
 
   try {
-    const analyzerSymbols = findAnalyzerSymbols(repoRoot, changedFiles);
+    const analyzerSymbols = await findAnalyzerSymbols(repoRoot, changedFiles);
     const symbols = synthesizeSymbols(changedFiles, analyzerSymbols);
     return renderLeftPaneChoiceTree(changedFiles, symbols);
   } finally {
@@ -178,14 +178,13 @@ function createTempRepoWithFiles(files: readonly ChangedFile[]): { repoRoot: str
   };
 }
 
-function findAnalyzerSymbols(repoRoot: string, files: readonly ChangedFile[]): SymbolSummary[] {
-  const changedRangesByFile = new Map(files.map((file) => [file.path, file.changedRanges]));
-  const analyzer = createTypeScriptAnalyzer({
+async function findAnalyzerSymbols(repoRoot: string, files: readonly ChangedFile[]): Promise<SymbolSummary[]> {
+  const analyzers = createLanguageAnalyzers({
     repoRoot,
-    changedRangesByFile,
-    changedFiles: files.map((file) => file.path)
+    changedFiles: files
   });
-  return analyzer?.findTouchedSymbols() ?? [];
+  const snapshots = await Promise.all(analyzers.map((analyzer) => analyzer.buildSnapshot()));
+  return snapshots.flatMap((snapshot) => snapshot.symbols);
 }
 
 function synthesizeSymbols(changedFiles: readonly ChangedFile[], analyzerSymbols: readonly SymbolSummary[]): SymbolSummary[] {

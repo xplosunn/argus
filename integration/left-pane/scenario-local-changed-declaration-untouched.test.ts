@@ -2,8 +2,8 @@ import { expect, it } from "vitest";
 
 import { runLeftPaneScenario } from "./helpers";
 
-it("left-pane scenario: local changed but declaration line untouched", () => {
-  const leftPane = runLeftPaneScenario([
+it("left-pane scenario: local changed but declaration line untouched", async () => {
+  const leftPane = await runLeftPaneScenario([
     {
       path: "src/calc.ts",
       status: "modified",

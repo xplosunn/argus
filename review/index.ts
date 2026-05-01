@@ -10,7 +10,7 @@ import type {
   SymbolSummary,
   UsagesResponse
 } from "../protocol";
-import { createTypeScriptAnalyzer, isTypeScriptSupportedFile } from "../language/typescript";
+import { createLanguageAnalyzers, isLanguageSupportedFile } from "../language";
 import {
   areEquivalentBranchRefs,
   detectDefaultBranch,
@@ -39,11 +39,11 @@ export interface ReviewSession {
   getDependencyGraph(): ReviewDependencyGraph;
 }
 
-export function createStaticReviewBundle(options: CreateReviewSessionOptions): StaticReviewBundle {
-  return buildStaticReviewBundle(createReviewSession(options));
+export async function createStaticReviewBundle(options: CreateReviewSessionOptions): Promise<StaticReviewBundle> {
+  return buildStaticReviewBundle(await createReviewSession(options));
 }
 
-export function createReviewSession(options: CreateReviewSessionOptions): ReviewSession {
+export async function createReviewSession(options: CreateReviewSessionOptions): Promise<ReviewSession> {
   const defaultBranch = options.defaultBranch ?? detectDefaultBranch(options.repoRoot);
   const currentBranch = getCurrentBranch(options.repoRoot);
   const isOnDefaultBranch = areEquivalentBranchRefs(currentBranch, defaultBranch);
@@ -82,14 +82,15 @@ export function createReviewSession(options: CreateReviewSessionOptions): Review
       });
   const fileContentByPath = new Map(changedFiles.map((file) => [file.path, file.content]));
 
-  const changedRangesByFile = new Map(changedFiles.map((file) => [file.path, file.changedRanges]));
-  const analyzer = createTypeScriptAnalyzer({
+  const analyzers = createLanguageAnalyzers({
     repoRoot: options.repoRoot,
-    changedRangesByFile,
-    changedFiles: changedFiles.map((file) => file.path)
+    changedFiles
   });
-  const analyzerSymbols = analyzer?.findTouchedSymbols() ?? [];
-  const fallbackSymbols = buildUnsupportedFileSymbols(changedFiles, analyzerSymbols);
+  const snapshots = await Promise.all(analyzers.map((analyzer) => analyzer.buildSnapshot()));
+  const analyzerSymbols = snapshots.flatMap((snapshot) => snapshot.symbols);
+  const handledFiles = new Set(snapshots.flatMap((snapshot) => [...snapshot.handledFiles]));
+  const usagesBySymbolId = new Map(snapshots.flatMap((snapshot) => [...snapshot.usagesBySymbolId.entries()]));
+  const fallbackSymbols = buildUnsupportedFileSymbols(changedFiles, analyzerSymbols, handledFiles);
   const removalSymbols = buildRemovalChunkSymbols(changedFiles, analyzerSymbols);
   const symbols = [...analyzerSymbols, ...fallbackSymbols, ...removalSymbols].sort(compareSymbols);
   const fallbackSymbolMap = new Map([...fallbackSymbols, ...removalSymbols].map((symbol) => [symbol.id, symbol]));
@@ -112,11 +113,10 @@ export function createReviewSession(options: CreateReviewSessionOptions): Review
     })),
     symbols
   };
-  let dependencyGraph: ReviewDependencyGraph | null = null;
   const getUsagesForSymbol = (symbolId: string): UsagesResponse | null => {
-    const analyzerResult = analyzer?.getUsages(symbolId);
-    if (analyzerResult) {
-      return analyzerResult;
+    const snapshotResult = usagesBySymbolId.get(symbolId);
+    if (snapshotResult) {
+      return snapshotResult;
     }
 
     const fallbackSymbol = fallbackSymbolMap.get(symbolId);
@@ -129,6 +129,7 @@ export function createReviewSession(options: CreateReviewSessionOptions): Review
       usages: []
     };
   };
+  const dependencyGraph = buildReviewDependencyGraph(bootstrap, getUsagesForSymbol);
 
   return {
     bootstrap,
@@ -144,7 +145,6 @@ export function createReviewSession(options: CreateReviewSessionOptions): Review
     },
     getUsages: getUsagesForSymbol,
     getDependencyGraph(): ReviewDependencyGraph {
-      dependencyGraph ??= buildReviewDependencyGraph(bootstrap, getUsagesForSymbol);
       return dependencyGraph;
     }
   };
@@ -162,13 +162,14 @@ function assertBranchReviewHasCleanWorktree(repoRoot: string, defaultBranch: str
 
 function buildUnsupportedFileSymbols(
   changedFiles: readonly ChangedFile[],
-  existingSymbols: readonly SymbolSummary[]
+  existingSymbols: readonly SymbolSummary[],
+  handledFiles: ReadonlySet<string> = new Set(existingSymbols.map((symbol) => symbol.declaration.filePath))
 ): SymbolSummary[] {
   const filesWithSymbols = new Set(existingSymbols.map((symbol) => symbol.declaration.filePath));
   const fallbackSymbols: SymbolSummary[] = [];
 
   for (const changedFile of changedFiles) {
-    if (isTypeScriptSupportedFile(changedFile.path)) {
+    if (isLanguageSupportedFile(changedFile.path) && handledFiles.has(changedFile.path)) {
       continue;
     }
     if (filesWithSymbols.has(changedFile.path)) {

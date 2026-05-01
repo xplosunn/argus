@@ -2,8 +2,8 @@ import { expect, it } from "vitest";
 
 import { runLeftPaneScenario } from "./helpers";
 
-it("left-pane scenario: detects top-level test symbols without describe", () => {
-  const leftPane = runLeftPaneScenario([
+it("left-pane scenario: detects top-level test symbols without describe", async () => {
+  const leftPane = await runLeftPaneScenario([
     {
       path: "src/calc.test.ts",
       status: "modified",

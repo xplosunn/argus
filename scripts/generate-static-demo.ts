@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   const webClientRoot = await resolveWebClientRoot();
   const repoName = detectRepoName(repoRoot);
   const bundle = sanitizeBundle(
-    createStaticReviewBundle({
+    await createStaticReviewBundle({
       repoRoot,
       defaultBranch: options.defaultBranch
     }),

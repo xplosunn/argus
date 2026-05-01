@@ -2,8 +2,8 @@ import { expect, it } from "vitest";
 
 import { runLeftPaneScenario } from "./helpers";
 
-it("left-pane scenario: hunk at end of file", () => {
-  const leftPane = runLeftPaneScenario([
+it("left-pane scenario: hunk at end of file", async () => {
+  const leftPane = await runLeftPaneScenario([
     {
       path: "src/calc.ts",
       status: "modified",

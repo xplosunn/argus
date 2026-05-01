@@ -2,8 +2,8 @@ import { expect, it } from "vitest";
 
 import { runLeftPaneScenario } from "./helpers";
 
-it("left-pane scenario: hides synthetic line counts under added top-level symbols", () => {
-  const leftPane = runLeftPaneScenario([
+it("left-pane scenario: hides synthetic line counts under added top-level symbols", async () => {
+  const leftPane = await runLeftPaneScenario([
     {
       path: "src/calc.test.ts",
       status: "modified",
