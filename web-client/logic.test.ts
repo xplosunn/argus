@@ -9,6 +9,7 @@ import {
   compareSymbols,
   countPatchLineTotals,
   countUsagesInDiff,
+  filterDependencyGraphEdgesForHiddenSources,
   filterLocalSymbolsForTopLevel,
   fileNameForPath,
   fitDependencyGraphLayoutToBounds,
@@ -214,6 +215,31 @@ describe("web-client logic helpers", () => {
       ["feature"],
       ["cycle-a", "cycle-b", "dependent"]
     ]);
+  });
+
+  it("hides only outgoing arrows for directories with hidden sources", () => {
+    const visibleEdges = filterDependencyGraphEdgesForHiddenSources(
+      [
+        {
+          id: "from-a-to-b",
+          sourceDirectoryPath: "pkg/a",
+          targetDirectoryPath: "pkg/b"
+        },
+        {
+          id: "from-c-to-a",
+          sourceDirectoryPath: "pkg/c",
+          targetDirectoryPath: "pkg/a"
+        },
+        {
+          id: "from-a-to-a",
+          sourceDirectoryPath: "pkg/a",
+          targetDirectoryPath: "pkg/a"
+        }
+      ],
+      new Set(["pkg/a"])
+    );
+
+    expect(visibleEdges.map((edge) => edge.id)).toEqual(["from-c-to-a"]);
   });
 
   it("balances same-column dependency edges across outer corridors", () => {

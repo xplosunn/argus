@@ -429,6 +429,19 @@ export function groupDirectoriesByDependencyRank(graph) {
   return columns;
 }
 
+export function filterDependencyGraphEdgesForHiddenSources(edges, hiddenSourceDirectoryPaths) {
+  const hiddenSet =
+    hiddenSourceDirectoryPaths instanceof Set
+      ? hiddenSourceDirectoryPaths
+      : new Set(
+          (Array.isArray(hiddenSourceDirectoryPaths) ? hiddenSourceDirectoryPaths : []).filter(
+            (directoryPath) => typeof directoryPath === "string" && directoryPath.length > 0
+          )
+        );
+
+  return (edges ?? []).filter((edge) => !hiddenSet.has(edge?.sourceDirectoryPath));
+}
+
 export function folderForPath(filePath) {
   const lastSlash = filePath.lastIndexOf("/");
   if (lastSlash === -1) {

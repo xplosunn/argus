@@ -6,6 +6,7 @@ import {
   compareSymbols as compareSymbolsLogic,
   countPatchLineTotals as countPatchLineTotalsLogic,
   countUsagesInDiff as countUsagesInDiffLogic,
+  filterDependencyGraphEdgesForHiddenSources as filterDependencyGraphEdgesForHiddenSourcesLogic,
   filterLocalSymbolsForTopLevel as filterLocalSymbolsForTopLevelLogic,
   fileNameForPath as fileNameForPathLogic,
   fitDependencyGraphLayoutToBounds as fitDependencyGraphLayoutToBoundsLogic,
@@ -37,6 +38,8 @@ const state = {
   expandedTopLevelId: null,
   dependencyGraph: null,
   dependencyGraphRequest: null,
+  dependencyGraphLayout: null,
+  hiddenDependencySourceDirectoryPaths: new Set(),
   sortMode: "usages",
   usagesBySymbolId: new Map(),
   usageInDiffCountBySymbolId: new Map(),
@@ -582,6 +585,7 @@ async function renderDependencyGraph() {
       return;
     }
 
+    state.dependencyGraphLayout = layout;
     renderDependencyGraphSvg(graph, layout);
   } catch (error) {
     if (renderRequestId !== state.renderRequestId || state.selectedView !== "dependency-graph") {
@@ -664,7 +668,7 @@ async function layoutDependencyGraph(graph) {
   const nodeWidth = 220;
   const nodeHeight = 44;
   const directoryPaddingX = 14;
-  const directoryPaddingTop = 28;
+  const directoryPaddingTop = 54;
   const directoryPaddingBottom = 14;
   const directoryGap = 20;
   const fileGap = 10;
@@ -766,12 +770,16 @@ async function layoutDependencyGraph(graph) {
     if (!edgeDraft.source || !edgeDraft.target || !edgeDraft.sourceDirectory || !edgeDraft.targetDirectory) {
       return {
         ...edgeDraft.edge,
+        sourceDirectoryPath: null,
+        targetDirectoryPath: null,
         points: []
       };
     }
 
     return {
       ...edgeDraft.edge,
+      sourceDirectoryPath: edgeDraft.sourceDirectory.path,
+      targetDirectoryPath: edgeDraft.targetDirectory.path,
       points: pointsForDependencyEdge(
         edgeDraft.source,
         edgeDraft.sourceDirectory,
@@ -841,9 +849,13 @@ function renderDependencyGraphSvg(graph, layout) {
   }
   svg.appendChild(directoryLayer);
 
+  const visibleEdges = filterDependencyGraphEdgesForHiddenSources(
+    layout.edges,
+    state.hiddenDependencySourceDirectoryPaths
+  );
   const edgeLayer = createSvgElement("g");
   edgeLayer.classList.add("dependency-graph-edges");
-  for (const edge of layout.edges) {
+  for (const edge of visibleEdges) {
     const edgePath = createSvgElement("path");
     edgePath.classList.add("dependency-graph-edge");
     edgePath.setAttribute("d", pathFromGraphPoints(edge.points));
@@ -910,11 +922,101 @@ function createDependencyGraphDirectory(directory) {
   const label = createSvgElement("text");
   label.classList.add("dependency-graph-directory-label");
   label.setAttribute("x", "14");
-  label.setAttribute("y", "19");
+  label.setAttribute("y", "18");
   label.textContent = truncateMiddle(directory.path, 30);
   group.appendChild(label);
 
+  group.appendChild(createDependencyGraphDirectoryToggle(directory));
+
   return group;
+}
+
+function createDependencyGraphDirectoryToggle(directory) {
+  const buttonWidth = 88;
+  const buttonHeight = 20;
+  const isHidden = state.hiddenDependencySourceDirectoryPaths.has(directory.path);
+  const group = createSvgElement("g");
+  group.classList.add("dependency-graph-directory-toggle");
+  if (isHidden) {
+    group.classList.add("is-hidden");
+  }
+  group.setAttribute("transform", `translate(${directory.width - buttonWidth - 14}, 24)`);
+  group.setAttribute("role", "button");
+  group.setAttribute("tabindex", "0");
+  group.setAttribute("aria-label", `${isHidden ? "Show" : "Hide"} outgoing arrows for ${directory.path}`);
+  group.setAttribute("aria-pressed", String(isHidden));
+  group.dataset.directoryPath = directory.path;
+
+  const title = createSvgElement("title");
+  title.textContent = isHidden ? "Show outgoing arrows" : "Hide outgoing arrows";
+  group.appendChild(title);
+
+  const rect = createSvgElement("rect");
+  rect.classList.add("dependency-graph-directory-toggle-rect");
+  rect.setAttribute("width", String(buttonWidth));
+  rect.setAttribute("height", String(buttonHeight));
+  rect.setAttribute("rx", "10");
+  group.appendChild(rect);
+
+  const label = createSvgElement("text");
+  label.classList.add("dependency-graph-directory-toggle-label");
+  label.setAttribute("x", String(buttonWidth / 2));
+  label.setAttribute("y", String(buttonHeight / 2 + 1));
+  label.setAttribute("text-anchor", "middle");
+  label.setAttribute("dominant-baseline", "middle");
+  label.textContent = isHidden ? "Show arrows" : "Hide arrows";
+  group.appendChild(label);
+
+  const toggle = () => {
+    toggleDependencyGraphSourceDirectoryVisibility(directory.path);
+  };
+  group.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggle();
+  });
+  group.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    toggle();
+  });
+
+  return group;
+}
+
+function toggleDependencyGraphSourceDirectoryVisibility(directoryPath) {
+  if (state.hiddenDependencySourceDirectoryPaths.has(directoryPath)) {
+    state.hiddenDependencySourceDirectoryPaths.delete(directoryPath);
+  } else {
+    state.hiddenDependencySourceDirectoryPaths.add(directoryPath);
+  }
+  rerenderStoredDependencyGraphPreservingScroll(directoryPath);
+}
+
+function rerenderStoredDependencyGraphPreservingScroll(focusDirectoryPath = null) {
+  if (!state.dependencyGraph || !state.dependencyGraphLayout || state.selectedView !== "dependency-graph") {
+    return;
+  }
+
+  const scrollLeft = codeViewElement.scrollLeft;
+  const scrollTop = codeViewElement.scrollTop;
+  renderDependencyGraphSvg(state.dependencyGraph, state.dependencyGraphLayout);
+  codeViewElement.scrollLeft = scrollLeft;
+  codeViewElement.scrollTop = scrollTop;
+
+  if (!focusDirectoryPath) {
+    return;
+  }
+
+  for (const toggle of codeViewElement.querySelectorAll(".dependency-graph-directory-toggle")) {
+    if (toggle instanceof SVGElement && toggle.dataset.directoryPath === focusDirectoryPath) {
+      toggle.focus();
+      break;
+    }
+  }
 }
 
 function pathFromGraphPoints(points) {
@@ -1488,6 +1590,10 @@ function assignDependencyEdgePorts(edgeDrafts) {
 
 function fitDependencyGraphLayoutToBounds(layout) {
   return fitDependencyGraphLayoutToBoundsLogic(layout);
+}
+
+function filterDependencyGraphEdgesForHiddenSources(edges, hiddenSourceDirectoryPaths) {
+  return filterDependencyGraphEdgesForHiddenSourcesLogic(edges, hiddenSourceDirectoryPaths);
 }
 
 function pointsForDependencyEdge(source, sourceDirectory, target, targetDirectory, columnLayouts, laneMeta, endpointPorts) {
