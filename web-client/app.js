@@ -844,10 +844,15 @@ function renderDependencyGraphSvg(graph, layout) {
   defs.appendChild(marker);
   svg.appendChild(defs);
 
+  const sourceDirectoryPaths = new Set(
+    (layout.edges ?? [])
+      .map((edge) => edge?.sourceDirectoryPath)
+      .filter((directoryPath) => typeof directoryPath === "string" && directoryPath.length > 0)
+  );
   const directoryLayer = createSvgElement("g");
   directoryLayer.classList.add("dependency-graph-directories");
   for (const directory of layout.directories ?? []) {
-    directoryLayer.appendChild(createDependencyGraphDirectory(directory));
+    directoryLayer.appendChild(createDependencyGraphDirectory(directory, sourceDirectoryPaths.has(directory.path)));
   }
   svg.appendChild(directoryLayer);
 
@@ -934,7 +939,7 @@ function createDependencyGraphNode(node) {
   return group;
 }
 
-function createDependencyGraphDirectory(directory) {
+function createDependencyGraphDirectory(directory, showToggle = false) {
   const group = createSvgElement("g");
   group.classList.add("dependency-graph-directory");
   group.setAttribute("transform", `translate(${directory.x}, ${directory.y})`);
@@ -957,7 +962,9 @@ function createDependencyGraphDirectory(directory) {
   label.textContent = truncateMiddle(directory.path, 30);
   group.appendChild(label);
 
-  group.appendChild(createDependencyGraphDirectoryToggle(directory));
+  if (showToggle) {
+    group.appendChild(createDependencyGraphDirectoryToggle(directory));
+  }
 
   return group;
 }
