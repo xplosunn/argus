@@ -165,6 +165,7 @@ async function writeStaticDemo(options: {
   const templateHtml = await fs.readFile(path.join(options.webClientRoot, "index.html"), "utf8");
   const appJs = await fs.readFile(path.join(options.webClientRoot, "app.js"), "utf8");
   const logicJs = await fs.readFile(path.join(options.webClientRoot, "logic.js"), "utf8");
+  const leftPaneFilterJs = await fs.readFile(path.join(options.webClientRoot, "left-pane-filter.js"), "utf8");
   const stylesCss = await fs.readFile(path.join(options.webClientRoot, "styles.css"), "utf8");
 
   await fs.writeFile(
@@ -176,6 +177,7 @@ async function writeStaticDemo(options: {
   await fs.writeFile(path.join(options.outputRoot, "mock-api.js"), buildMockApiScript());
   await fs.writeFile(path.join(options.outputRoot, "app.js"), appJs);
   await fs.writeFile(path.join(options.outputRoot, "logic.js"), logicJs);
+  await fs.writeFile(path.join(options.outputRoot, "left-pane-filter.js"), leftPaneFilterJs);
   await fs.writeFile(path.join(options.outputRoot, "styles.css"), stylesCss);
   await fs.writeFile(path.join(dataRoot, "bootstrap.json"), `${JSON.stringify(options.bundle.bootstrap, null, 2)}\n`);
   await fs.writeFile(path.join(dataRoot, "file-contents.json"), `${JSON.stringify(options.bundle.fileContentsByPath, null, 2)}\n`);

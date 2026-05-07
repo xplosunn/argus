@@ -5,6 +5,51 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Argus Review</title>
     <link rel="stylesheet" href="./styles.css" />
+    <style>
+      .pane-header-stacked {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+
+      .pane-header-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .pane-filter {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        min-width: 0;
+      }
+
+      .pane-filter input {
+        flex: 1;
+        min-width: 0;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #f9f5ec;
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        padding: 3px 7px;
+      }
+
+      .pane-filter input::placeholder {
+        color: var(--muted);
+      }
+
+      .pane-filter input:focus {
+        outline: 1px solid var(--accent);
+        outline-offset: 1px;
+      }
+    </style>
   </head>
   <body>
     <header class="topbar">
@@ -14,14 +59,20 @@
     </header>
     <main class="layout">
       <section class="pane pane-symbols">
-        <div class="pane-header">
-          <h2>Files & Symbols</h2>
-          <label class="pane-sort" for="symbols-sort">
-            <span>Sort</span>
-            <select id="symbols-sort">
-              <option value="alphabetical">Alphabetical</option>
-              <option value="usages" selected>Usages (diff, asc)</option>
-            </select>
+        <div class="pane-header pane-header-stacked">
+          <div class="pane-header-top">
+            <h2>Files & Symbols</h2>
+            <label class="pane-sort" for="symbols-sort">
+              <span>Sort</span>
+              <select id="symbols-sort">
+                <option value="alphabetical">Alphabetical</option>
+                <option value="usages" selected>Usages (diff, asc)</option>
+              </select>
+            </label>
+          </div>
+          <label class="pane-filter" for="symbols-filter">
+            <span>Filter</span>
+            <input id="symbols-filter" type="search" placeholder="name or path" autocomplete="off" />
           </label>
         </div>
         <div id="symbols-list" class="list"></div>
@@ -52,5 +103,6 @@
       </section>
     </main>
     <script type="module" src="./app.js"></script>
+    <script type="module" src="./left-pane-filter.js"></script>
   </body>
 </html>

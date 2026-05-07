@@ -22,9 +22,8 @@
   box-sizing: border-box;
 }
 
-.pane[hidden],
-.pane-resizer[hidden] {
-  display: none;
+[hidden] {
+  display: none !important;
 }
 
 body {
