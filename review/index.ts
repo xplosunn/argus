@@ -88,9 +88,8 @@ export async function createReviewSession(options: CreateReviewSessionOptions): 
   });
   const snapshots = await Promise.all(analyzers.map((analyzer) => analyzer.buildSnapshot()));
   const analyzerSymbols = snapshots.flatMap((snapshot) => snapshot.symbols);
-  const handledFiles = new Set(snapshots.flatMap((snapshot) => [...snapshot.handledFiles]));
   const usagesBySymbolId = new Map(snapshots.flatMap((snapshot) => [...snapshot.usagesBySymbolId.entries()]));
-  const fallbackSymbols = buildUnsupportedFileSymbols(changedFiles, analyzerSymbols, handledFiles);
+  const fallbackSymbols = buildUnsupportedFileSymbols(changedFiles, analyzerSymbols);
   const removalSymbols = buildRemovalChunkSymbols(changedFiles, analyzerSymbols);
   const symbols = [...analyzerSymbols, ...fallbackSymbols, ...removalSymbols].sort(compareSymbols);
   const fallbackSymbolMap = new Map([...fallbackSymbols, ...removalSymbols].map((symbol) => [symbol.id, symbol]));
@@ -162,14 +161,13 @@ function assertBranchReviewHasCleanWorktree(repoRoot: string, defaultBranch: str
 
 function buildUnsupportedFileSymbols(
   changedFiles: readonly ChangedFile[],
-  existingSymbols: readonly SymbolSummary[],
-  handledFiles: ReadonlySet<string> = new Set(existingSymbols.map((symbol) => symbol.declaration.filePath))
+  existingSymbols: readonly SymbolSummary[]
 ): SymbolSummary[] {
   const filesWithSymbols = new Set(existingSymbols.map((symbol) => symbol.declaration.filePath));
   const fallbackSymbols: SymbolSummary[] = [];
 
   for (const changedFile of changedFiles) {
-    if (isLanguageSupportedFile(changedFile.path) && handledFiles.has(changedFile.path)) {
+    if (isLanguageSupportedFile(changedFile.path)) {
       continue;
     }
     if (filesWithSymbols.has(changedFile.path)) {
