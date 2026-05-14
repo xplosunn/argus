@@ -135,8 +135,9 @@ function resolveClientRoot(): string {
   ];
 
   for (const candidate of candidates) {
-    if (fs.existsSync(path.join(candidate, "index.html"))) {
-      return candidate;
+    const builtDir = path.join(candidate, "dist");
+    if (fs.existsSync(path.join(builtDir, "index.html"))) {
+      return builtDir;
     }
   }
 

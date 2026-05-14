@@ -140,15 +140,16 @@ async function resolveWebClientRoot(): Promise<string> {
   ];
 
   for (const candidate of candidates) {
+    const builtDir = path.join(candidate, "dist");
     try {
-      await fs.access(path.join(candidate, "index.html"));
-      return candidate;
+      await fs.access(path.join(builtDir, "index.html"));
+      return builtDir;
     } catch {
       continue;
     }
   }
 
-  throw new Error("Unable to locate web-client assets.");
+  throw new Error("Frontend not built. Run `npm run build:web-client` first.");
 }
 
 async function writeStaticDemo(options: {
@@ -158,45 +159,30 @@ async function writeStaticDemo(options: {
   title: string;
 }): Promise<void> {
   await fs.rm(options.outputRoot, { recursive: true, force: true });
-  const dataRoot = path.join(options.outputRoot, "data");
   await fs.mkdir(options.outputRoot, { recursive: true });
-  await fs.mkdir(dataRoot, { recursive: true });
 
-  const templateHtml = await fs.readFile(path.join(options.webClientRoot, "index.html"), "utf8");
-  const appJs = await fs.readFile(path.join(options.webClientRoot, "app.js"), "utf8");
-  const logicJs = await fs.readFile(path.join(options.webClientRoot, "logic.js"), "utf8");
-  const leftPaneFilterJs = await fs.readFile(path.join(options.webClientRoot, "left-pane-filter.js"), "utf8");
-  const stylesCss = await fs.readFile(path.join(options.webClientRoot, "styles.css"), "utf8");
+  // Copy the entire Vite build output into the demo directory.
+  await fs.cp(options.webClientRoot, options.outputRoot, {
+    recursive: true,
+    filter: (src) => !src.includes("node_modules")
+  });
 
-  await fs.writeFile(
-    path.join(options.outputRoot, "index.html"),
-    buildStaticDemoHtml(templateHtml, {
-      title: options.title
-    })
-  );
+  // Patch the built index.html with the demo title and mock API script.
+  const indexPath = path.join(options.outputRoot, "index.html");
+  const indexHtml = await fs.readFile(indexPath, "utf8");
+  const modifiedHtml = indexHtml
+    .replace("<title>Argus Review</title>", `<title>${escapeHtml(options.title)} · Argus</title>`)
+    .replace("<script", '    <script src="./mock-api.js"></script>\n    <script');
+  await fs.writeFile(indexPath, modifiedHtml);
+
   await fs.writeFile(path.join(options.outputRoot, "mock-api.js"), buildMockApiScript());
-  await fs.writeFile(path.join(options.outputRoot, "app.js"), appJs);
-  await fs.writeFile(path.join(options.outputRoot, "logic.js"), logicJs);
-  await fs.writeFile(path.join(options.outputRoot, "left-pane-filter.js"), leftPaneFilterJs);
-  await fs.writeFile(path.join(options.outputRoot, "styles.css"), stylesCss);
+
+  const dataRoot = path.join(options.outputRoot, "data");
+  await fs.mkdir(dataRoot, { recursive: true });
   await fs.writeFile(path.join(dataRoot, "bootstrap.json"), `${JSON.stringify(options.bundle.bootstrap, null, 2)}\n`);
   await fs.writeFile(path.join(dataRoot, "file-contents.json"), `${JSON.stringify(options.bundle.fileContentsByPath, null, 2)}\n`);
   await fs.writeFile(path.join(dataRoot, "usages.json"), `${JSON.stringify(options.bundle.usagesBySymbolId, null, 2)}\n`);
   await fs.writeFile(path.join(dataRoot, "dependency-graph.json"), `${JSON.stringify(options.bundle.dependencyGraph, null, 2)}\n`);
-}
-
-function buildStaticDemoHtml(
-  templateHtml: string,
-  options: {
-    title: string;
-  }
-): string {
-  return templateHtml
-    .replace("<title>Argus Review</title>", `<title>${escapeHtml(options.title)} · Argus</title>`)
-    .replace(
-      '<script type="module" src="./app.js"></script>',
-      '    <script src="./mock-api.js"></script>\n    <script type="module" src="./app.js"></script>'
-    );
 }
 
 function buildMockApiScript(): string {

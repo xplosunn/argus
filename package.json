@@ -7,16 +7,21 @@
   "bin": {
     "argus": "dist/cli/index.js"
   },
+  "files": [
+    "dist/",
+    "web-client/dist/"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prepack": "npm run build",
+    "build:web-client": "cd web-client && npx vite build",
+    "prepack": "npm run build && npm run build:web-client",
     "check": "tsc --noEmit -p tsconfig.json",
-    "landing-page:demo": "npm run build && node dist/scripts/generate-static-demo.js",
+    "landing-page:demo": "npm run build && npm run build:web-client && node dist/scripts/generate-static-demo.js",
     "landing-page:preview": "npx serve -l 4173 landing-page",
     "test": "vitest run",
     "test:watch": "vitest",
     "review": "tsx cli/index.ts review",
-    "start": "node dist/cli/index.js review"
+    "start": "npm run build:web-client && node dist/cli/index.js review"
   },
   "keywords": [],
   "author": "",
